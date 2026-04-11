@@ -3,13 +3,13 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "ofxstatement-sample"
-version = "0.0.1"
+name = "ofxstatement-revolut"
+version = "0.1.0"
 authors = [
-  { name="Andrey Lebedev", email="andrey@lebedev.lt" },
+  { name="Eduard Ralph" },
 ]
-description = "Sample plugin for ofxstatement"
-readme = "README.rst"
+description = "Revolut plugin for ofxstatement"
+readme = "README.md"
 requires-python = ">=3.9"
 classifiers = [
     "Development Status :: 3 - Alpha",
@@ -21,13 +21,20 @@ classifiers = [
     "Operating System :: OS Independent",
     "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
 ]
-keywords = ["ofx", "banking", "statement", "plugin", "ofxstatement"]
+keywords = ["ofx", "banking", "statement", "plugin", "ofxstatement", "revolut"]
 dependencies = [
   "ofxstatement",
+  "pdfplumber",
+]
+
+[project.optional-dependencies]
+test = [
+  "pytest",
+  "fpdf2",
 ]
 
 [project.urls]
-Homepage = "https://github.com/kedder/ofxstatement-sample/"
+Homepage = "https://github.com/kedder/ofxstatement-revolut/"
 
 [project.entry-points."ofxstatement"]
-sample = "ofxstatement_sample.plugin:SamplePlugin"
+revolut = "ofxstatement_revolut.plugin:RevolutPlugin"

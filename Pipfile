@@ -13,4 +13,5 @@ tomli = "*"
 
 [packages]
 ofxstatement = "*"
-ofxstatement-sample = {editable = true,path = "."}
+ofxstatement-revolut = {editable = true, path = "."}
+pdfplumber = "*"
