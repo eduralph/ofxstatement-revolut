@@ -10,6 +10,7 @@ black = "*"
 exceptiongroup = "*"
 build = "*"
 tomli = "*"
+fpdf2 = "*"
 
 [packages]
 ofxstatement = "*"
