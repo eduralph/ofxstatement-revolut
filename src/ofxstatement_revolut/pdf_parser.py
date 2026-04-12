@@ -32,10 +32,10 @@ logger = logging.getLogger(__name__)
 # header row, at which point the thresholds are recalibrated from the actual
 # header word positions. This makes the parser tolerant of minor layout shifts
 # between Revolut PDF versions.
-_DEFAULT_DESC_X = 120
-_DEFAULT_MONEY_OUT_X = 300
-_DEFAULT_MONEY_IN_X = 400
-_DEFAULT_BALANCE_X = 500
+_DEFAULT_DESC_X = 120.0
+_DEFAULT_MONEY_OUT_X = 300.0
+_DEFAULT_MONEY_IN_X = 400.0
+_DEFAULT_BALANCE_X = 500.0
 
 # ── Multi-language month names ───────────────────────────────────────────────
 #
@@ -46,71 +46,169 @@ _DEFAULT_BALANCE_X = 500
 # into; values are the month number (1–12). Add new languages here as needed.
 _MONTH_NAME_TABLE: Tuple[Tuple[str, int], ...] = (
     # English
-    ("jan", 1), ("january", 1), ("feb", 2), ("february", 2),
-    ("mar", 3), ("march", 3), ("apr", 4), ("april", 4),
-    ("may", 5), ("jun", 6), ("june", 6), ("jul", 7), ("july", 7),
-    ("aug", 8), ("august", 8), ("sep", 9), ("sept", 9), ("september", 9),
-    ("oct", 10), ("october", 10), ("nov", 11), ("november", 11),
-    ("dec", 12), ("december", 12),
+    ("jan", 1),
+    ("january", 1),
+    ("feb", 2),
+    ("february", 2),
+    ("mar", 3),
+    ("march", 3),
+    ("apr", 4),
+    ("april", 4),
+    ("may", 5),
+    ("jun", 6),
+    ("june", 6),
+    ("jul", 7),
+    ("july", 7),
+    ("aug", 8),
+    ("august", 8),
+    ("sep", 9),
+    ("sept", 9),
+    ("september", 9),
+    ("oct", 10),
+    ("october", 10),
+    ("nov", 11),
+    ("november", 11),
+    ("dec", 12),
+    ("december", 12),
     # German
-    ("januar", 1), ("jän", 1), ("jänner", 1),
+    ("januar", 1),
+    ("jän", 1),
+    ("jänner", 1),
     ("februar", 2),
-    ("mär", 3), ("märz", 3),
+    ("mär", 3),
+    ("märz", 3),
     ("mai", 5),
-    ("juni", 6), ("juli", 7),
-    ("okt", 10), ("oktober", 10),
-    ("dez", 12), ("dezember", 12),
+    ("juni", 6),
+    ("juli", 7),
+    ("okt", 10),
+    ("oktober", 10),
+    ("dez", 12),
+    ("dezember", 12),
     # French
-    ("janv", 1), ("janvier", 1),
-    ("févr", 2), ("fevr", 2), ("février", 2), ("fevrier", 2),
+    ("janv", 1),
+    ("janvier", 1),
+    ("févr", 2),
+    ("fevr", 2),
+    ("février", 2),
+    ("fevrier", 2),
     ("mars", 3),
-    ("avr", 4), ("avril", 4),
-    ("juin", 6), ("juil", 7), ("juillet", 7),
-    ("août", 8), ("aout", 8),
-    ("septembre", 9), ("octobre", 10),
+    ("avr", 4),
+    ("avril", 4),
+    ("juin", 6),
+    ("juil", 7),
+    ("juillet", 7),
+    ("août", 8),
+    ("aout", 8),
+    ("septembre", 9),
+    ("octobre", 10),
     ("novembre", 11),
-    ("déc", 12), ("décembre", 12), ("decembre", 12),
+    ("déc", 12),
+    ("décembre", 12),
+    ("decembre", 12),
     # Spanish
-    ("ene", 1), ("enero", 1),
-    ("febrero", 2), ("marzo", 3),
-    ("abr", 4), ("abril", 4),
-    ("mayo", 5), ("junio", 6), ("julio", 7),
-    ("ago", 8), ("agosto", 8),
-    ("septiembre", 9), ("octubre", 10),
-    ("noviembre", 11), ("dic", 12), ("diciembre", 12),
+    ("ene", 1),
+    ("enero", 1),
+    ("febrero", 2),
+    ("marzo", 3),
+    ("abr", 4),
+    ("abril", 4),
+    ("mayo", 5),
+    ("junio", 6),
+    ("julio", 7),
+    ("ago", 8),
+    ("agosto", 8),
+    ("septiembre", 9),
+    ("octubre", 10),
+    ("noviembre", 11),
+    ("dic", 12),
+    ("diciembre", 12),
     # Italian
-    ("gen", 1), ("gennaio", 1), ("febbraio", 2),
-    ("aprile", 4), ("mag", 5), ("maggio", 5),
-    ("giu", 6), ("giugno", 6), ("lug", 7), ("luglio", 7),
-    ("set", 9), ("sett", 9), ("settembre", 9),
-    ("ott", 10), ("ottobre", 10), ("dicembre", 12),
+    ("gen", 1),
+    ("gennaio", 1),
+    ("febbraio", 2),
+    ("aprile", 4),
+    ("mag", 5),
+    ("maggio", 5),
+    ("giu", 6),
+    ("giugno", 6),
+    ("lug", 7),
+    ("luglio", 7),
+    ("set", 9),
+    ("sett", 9),
+    ("settembre", 9),
+    ("ott", 10),
+    ("ottobre", 10),
+    ("dicembre", 12),
     # Portuguese
-    ("janeiro", 1), ("fev", 2), ("fevereiro", 2),
-    ("março", 3), ("marco", 3),
-    ("maio", 5), ("junho", 6), ("julho", 7),
-    ("set", 9), ("setembro", 9),
-    ("out", 10), ("outubro", 10),
-    ("novembro", 11), ("dez", 12), ("dezembro", 12),
+    ("janeiro", 1),
+    ("fev", 2),
+    ("fevereiro", 2),
+    ("março", 3),
+    ("marco", 3),
+    ("maio", 5),
+    ("junho", 6),
+    ("julho", 7),
+    ("set", 9),
+    ("setembro", 9),
+    ("out", 10),
+    ("outubro", 10),
+    ("novembro", 11),
+    ("dez", 12),
+    ("dezembro", 12),
     # Dutch
-    ("januari", 1), ("februari", 2),
-    ("mrt", 3), ("maart", 3),
-    ("mei", 5), ("juni", 6), ("juli", 7),
-    ("augustus", 8), ("okt", 10),
+    ("januari", 1),
+    ("februari", 2),
+    ("mrt", 3),
+    ("maart", 3),
+    ("mei", 5),
+    ("juni", 6),
+    ("juli", 7),
+    ("augustus", 8),
+    ("okt", 10),
     # Polish (nominative + genitive — Polish dates use genitive: "15 stycznia")
-    ("sty", 1), ("styczeń", 1), ("styczen", 1), ("stycznia", 1),
-    ("lut", 2), ("luty", 2), ("lutego", 2),
-    ("marzec", 3), ("marca", 3),
-    ("kwi", 4), ("kwiecień", 4), ("kwiecien", 4), ("kwietnia", 4),
-    ("maj", 5), ("maja", 5),
-    ("cze", 6), ("czerwiec", 6), ("czerwca", 6),
-    ("lip", 7), ("lipiec", 7), ("lipca", 7),
-    ("sie", 8), ("sierpień", 8), ("sierpien", 8), ("sierpnia", 8),
-    ("wrz", 9), ("wrzesień", 9), ("wrzesien", 9), ("września", 9), ("wrzesnia", 9),
-    ("paź", 10), ("paz", 10),
-    ("październik", 10), ("pazdziernik", 10),
-    ("października", 10), ("pazdziernika", 10),
-    ("lis", 11), ("listopad", 11), ("listopada", 11),
-    ("gru", 12), ("grudzień", 12), ("grudzien", 12), ("grudnia", 12),
+    ("sty", 1),
+    ("styczeń", 1),
+    ("styczen", 1),
+    ("stycznia", 1),
+    ("lut", 2),
+    ("luty", 2),
+    ("lutego", 2),
+    ("marzec", 3),
+    ("marca", 3),
+    ("kwi", 4),
+    ("kwiecień", 4),
+    ("kwiecien", 4),
+    ("kwietnia", 4),
+    ("maj", 5),
+    ("maja", 5),
+    ("cze", 6),
+    ("czerwiec", 6),
+    ("czerwca", 6),
+    ("lip", 7),
+    ("lipiec", 7),
+    ("lipca", 7),
+    ("sie", 8),
+    ("sierpień", 8),
+    ("sierpien", 8),
+    ("sierpnia", 8),
+    ("wrz", 9),
+    ("wrzesień", 9),
+    ("wrzesien", 9),
+    ("września", 9),
+    ("wrzesnia", 9),
+    ("paź", 10),
+    ("paz", 10),
+    ("październik", 10),
+    ("pazdziernik", 10),
+    ("października", 10),
+    ("pazdziernika", 10),
+    ("lis", 11),
+    ("listopad", 11),
+    ("listopada", 11),
+    ("gru", 12),
+    ("grudzień", 12),
+    ("grudzien", 12),
+    ("grudnia", 12),
 )
 
 # Built from _MONTH_NAME_TABLE. Collisions across languages are allowed as
@@ -135,10 +233,10 @@ _L = r"[^\W\d_]"
 # validation happens in _parse_date.
 _DATE_RE = re.compile(
     r"^(?:"
-    rf"{_L}+\.?\s\d{{1,2}},\s\d{{4}}"          # Jan 15, 2025 / enero 15, 2025
-    rf"|\d{{1,2}}\.?\s{_L}+\.?\s\d{{4}}"       # 15 Jan 2025 / 15. Januar 2025
-    r"|\d{4}-\d{2}-\d{2}"                       # 2025-01-15
-    r"|\d{1,2}/\d{1,2}/\d{4}"                   # 15/01/2025
+    rf"{_L}+\.?\s\d{{1,2}},\s\d{{4}}"  # Jan 15, 2025 / enero 15, 2025
+    rf"|\d{{1,2}}\.?\s{_L}+\.?\s\d{{4}}"  # 15 Jan 2025 / 15. Januar 2025
+    r"|\d{4}-\d{2}-\d{2}"  # 2025-01-15
+    r"|\d{1,2}/\d{1,2}/\d{4}"  # 15/01/2025
     r")$"
 )
 
@@ -168,9 +266,7 @@ _SECTION_DATE_PATTERN = (
 
 # Connectors used in "<date> to <date>" ranges across supported languages.
 # Broadened from the English "to" alone. Matched case-insensitively.
-_SECTION_CONNECTOR = (
-    r"(?:to|bis|au|à|até|hasta|al|a|tot|do|-)"
-)
+_SECTION_CONNECTOR = r"(?:to|bis|au|à|até|hasta|al|a|tot|do|-)"
 
 # Words that introduce a section (equivalent of English "Account" / "Deposit").
 # Only the language-specific labels; the structural regex below does not
@@ -179,17 +275,35 @@ _SECTION_CONNECTOR = (
 # matches either set; _canonical_section() maps the matched word back to
 # "Account" or "Deposit" so downstream filtering stays language-independent.
 _SECTION_ACCOUNT_ALIASES: Tuple[str, ...] = (
-    "Account", "Konto", "Compte", "Cuenta", "Conto", "Conta",
-    "Rekening", "Rachunek",
+    "Account",
+    "Konto",
+    "Compte",
+    "Cuenta",
+    "Conto",
+    "Conta",
+    "Rekening",
+    "Rachunek",
 )
 _SECTION_DEPOSIT_ALIASES: Tuple[str, ...] = (
-    "Deposit", "Savings",
-    "Einlage", "Depot", "Sparkonto",
-    "Dépôt", "Depot", "Epargne", "Épargne",
-    "Depósito", "Deposito", "Ahorro", "Risparmi",
-    "Poupança", "Poupanca",
+    "Deposit",
+    "Savings",
+    "Einlage",
+    "Depot",
+    "Sparkonto",
+    "Dépôt",
+    "Depot",
+    "Epargne",
+    "Épargne",
+    "Depósito",
+    "Deposito",
+    "Ahorro",
+    "Risparmi",
+    "Poupança",
+    "Poupanca",
     "Spaargeld",
-    "Lokata", "Oszczędności", "Oszczednosci",
+    "Lokata",
+    "Oszczędności",
+    "Oszczednosci",
 )
 
 _SECTION_ACCOUNT_WORDS = (
@@ -211,6 +325,7 @@ def _canonical_section(word: str) -> str:
     if w in _SECTION_DEPOSIT_SET:
         return "Deposit"
     return word  # unknown — preserve as-is so it surfaces in logs
+
 
 # Final section-header regex. Format:
 #   [<Owner>'s ] <section-word> <anything> <date> <connector> <date>
@@ -235,19 +350,21 @@ _IBAN_RE = re.compile(r"IBAN\s+([A-Z]{2}\d{2}[A-Z0-9]+)")
 # any of the known localized equivalents. Using an explicit list instead
 # of "<CUR> <any-word>" avoids false matches on lines like "CEO JANE".
 _STATEMENT_WORDS: Tuple[str, ...] = (
-    "Statement",                              # EN
-    "Kontoauszug", "Kontoauszüge",            # DE
-    "Relevé", "Releve",                        # FR
-    "Extracto",                                # ES
-    "Estratto",                                # IT
-    "Extrato",                                 # PT
-    "Afschrift", "Rekeningafschrift",          # NL
-    "Wyciąg", "Wyciag",                        # PL
+    "Statement",  # EN
+    "Kontoauszug",
+    "Kontoauszüge",  # DE
+    "Relevé",
+    "Releve",  # FR
+    "Extracto",  # ES
+    "Estratto",  # IT
+    "Extrato",  # PT
+    "Afschrift",
+    "Rekeningafschrift",  # NL
+    "Wyciąg",
+    "Wyciag",  # PL
 )
 _CURRENCY_RE = re.compile(
-    r"^([A-Z]{3})\s+(?:"
-    + "|".join(re.escape(w) for w in _STATEMENT_WORDS)
-    + r")\b.*$",
+    r"^([A-Z]{3})\s+(?:" + "|".join(re.escape(w) for w in _STATEMENT_WORDS) + r")\b.*$",
     re.MULTILINE,
 )
 _SORT_CODE_RE = re.compile(r"Sort Code\s+(\d{6})")
@@ -266,46 +383,92 @@ _ACCOUNT_NUMBER_RE = re.compile(r"Account Number\s+(\d{6,})")
 # alias level).
 _HEADER_ALIASES: Dict[str, List[str]] = {
     "date": [
-        "Date",                                # EN / FR
-        "Datum",                               # DE / NL
-        "Fecha",                               # ES
-        "Data",                                # IT / PT / PL
+        "Date",  # EN / FR
+        "Datum",  # DE / NL
+        "Fecha",  # ES
+        "Data",  # IT / PT / PL
     ],
     "description": [
-        "Description",                         # EN / FR
-        "Details",                             # EN
-        "Beschreibung",                        # DE
-        "Descripción", "Descripcion",          # ES
-        "Descrizione",                         # IT
-        "Descrição", "Descricao",              # PT
-        "Omschrijving",                        # NL
-        "Opis",                                # PL
-        "Libellé", "Libelle",                  # FR (alt.)
+        "Description",  # EN / FR
+        "Details",  # EN
+        "Beschreibung",  # DE
+        "Descripción",
+        "Descripcion",  # ES
+        "Descrizione",  # IT
+        "Descrição",
+        "Descricao",  # PT
+        "Omschrijving",  # NL
+        "Opis",  # PL
+        "Libellé",
+        "Libelle",  # FR (alt.)
     ],
     "money_out": [
-        "Money out", "Withdrawals", "Paid out", "Debit",                # EN
-        "Ausgehend", "Ausgänge", "Ausgaenge", "Abhebung", "Soll",       # DE
-        "Débit", "Debit", "Sortie", "Retrait",                          # FR
-        "Débito", "Debito", "Retiros", "Cargo",                         # ES
-        "Uscite", "Prelievi", "Addebito",                               # IT
-        "Saída", "Saida", "Débito", "Retirada",                         # PT
-        "Uit", "Opnames",                                                # NL
-        "Obciążenia", "Obciazenia", "Wypłaty", "Wyplaty",               # PL
+        "Money out",
+        "Withdrawals",
+        "Paid out",
+        "Debit",  # EN
+        "Ausgehend",
+        "Ausgänge",
+        "Ausgaenge",
+        "Abhebung",
+        "Soll",  # DE
+        "Débit",
+        "Debit",
+        "Sortie",
+        "Retrait",  # FR
+        "Débito",
+        "Debito",
+        "Retiros",
+        "Cargo",  # ES
+        "Uscite",
+        "Prelievi",
+        "Addebito",  # IT
+        "Saída",
+        "Saida",
+        "Débito",
+        "Retirada",  # PT
+        "Uit",
+        "Opnames",  # NL
+        "Obciążenia",
+        "Obciazenia",
+        "Wypłaty",
+        "Wyplaty",  # PL
     ],
     "money_in": [
-        "Money in", "Deposits", "Paid in", "Credit",                    # EN
-        "Eingehend", "Eingänge", "Eingaenge", "Einzahlung", "Haben",    # DE
-        "Crédit", "Credit", "Entrée", "Entree",                         # FR
-        "Crédito", "Credito", "Depósitos", "Depositos", "Abono",        # ES
-        "Entrate", "Versamenti", "Accredito",                           # IT
-        "Entrada", "Depósito", "Deposito",                              # PT
-        "In", "Stortingen",                                              # NL
-        "Uznania", "Wpłaty", "Wplaty",                                  # PL
+        "Money in",
+        "Deposits",
+        "Paid in",
+        "Credit",  # EN
+        "Eingehend",
+        "Eingänge",
+        "Eingaenge",
+        "Einzahlung",
+        "Haben",  # DE
+        "Crédit",
+        "Credit",
+        "Entrée",
+        "Entree",  # FR
+        "Crédito",
+        "Credito",
+        "Depósitos",
+        "Depositos",
+        "Abono",  # ES
+        "Entrate",
+        "Versamenti",
+        "Accredito",  # IT
+        "Entrada",
+        "Depósito",
+        "Deposito",  # PT
+        "In",
+        "Stortingen",  # NL
+        "Uznania",
+        "Wpłaty",
+        "Wplaty",  # PL
     ],
     "balance": [
-        "Balance",                             # EN / FR
-        "Saldo",                               # DE / ES / IT / PT / NL / PL
-        "Solde",                               # FR
+        "Balance",  # EN / FR
+        "Saldo",  # DE / ES / IT / PT / NL / PL
+        "Solde",  # FR
     ],
 }
 
@@ -313,14 +476,21 @@ _HEADER_ALIASES: Dict[str, List[str]] = {
 # matches. Multilingual so "Gebühr" / "frais" / "tassa" / "tarifa" / "taxa"
 # / "opłata" trigger FEE classification.
 _FEE_WORDS: Tuple[str, ...] = (
-    "fee",                   # EN
-    "gebühr", "gebuhr",      # DE
-    "frais",                 # FR
-    "tarifa", "comisión", "comision",  # ES
-    "tassa", "commissione",  # IT
-    "taxa", "tarifa",        # PT
-    "kosten", "vergoeding",  # NL
-    "opłata", "oplata",      # PL
+    "fee",  # EN
+    "gebühr",
+    "gebuhr",  # DE
+    "frais",  # FR
+    "tarifa",
+    "comisión",
+    "comision",  # ES
+    "tassa",
+    "commissione",  # IT
+    "taxa",
+    "tarifa",  # PT
+    "kosten",
+    "vergoeding",  # NL
+    "opłata",
+    "oplata",  # PL
 )
 _FEE_RE = re.compile(
     r"\b(?:" + "|".join(re.escape(w) for w in _FEE_WORDS) + r")\b",
@@ -391,9 +561,9 @@ def _parse_date(date_str: str) -> datetime:
 
     m = _MONTH_NAME_DATE_RE.match(date_str)
     if m:
-        if m.group(1) is not None:               # "Month D, YYYY"
+        if m.group(1) is not None:  # "Month D, YYYY"
             mon_raw, day, year = m.group(1), m.group(2), m.group(3)
-        else:                                     # "D Month YYYY"
+        else:  # "D Month YYYY"
             day, mon_raw, year = m.group(4), m.group(5), m.group(6)
         mon = _MONTH_NAMES.get(mon_raw.casefold().rstrip("."))
         if mon is not None:
@@ -404,6 +574,7 @@ def _parse_date(date_str: str) -> datetime:
 
 class RevolutPDFFormatError(ValueError):
     """Raised when the PDF has content but nothing the parser recognises."""
+
 
 # Currencies Revolut writes with a leading symbol (e.g. "$19.61", "€50.00").
 # Anything not in this map is written with a trailing ISO code
@@ -438,34 +609,34 @@ _TRAILING_CODE_RE = re.compile(r"\s*[A-Z]{3}$")
 # If you encounter a misclassified transaction, please open an issue.
 PDF_TXN_TYPE_MAP: List[Tuple[str, str]] = [
     # ── Transfers ─────────────────────────────────────────────────────────
-    ("Transfer to", "XFER"),            # ★ outgoing transfer to person/account
-    ("Transfer from", "XFER"),          # ★ incoming transfer from person/account
-    ("SWIFT Transfer to", "XFER"),      # ★ outgoing SWIFT / international transfer
-    ("SWIFT Transfer from", "XFER"),    # ○ incoming SWIFT / international transfer
+    ("Transfer to", "XFER"),  # ★ outgoing transfer to person/account
+    ("Transfer from", "XFER"),  # ★ incoming transfer from person/account
+    ("SWIFT Transfer to", "XFER"),  # ★ outgoing SWIFT / international transfer
+    ("SWIFT Transfer from", "XFER"),  # ○ incoming SWIFT / international transfer
     # ── Incoming payments ─────────────────────────────────────────────────
-    ("Payment from", "DEP"),            # ★ incoming payment (SEPA credit transfer)
+    ("Payment from", "DEP"),  # ★ incoming payment (SEPA credit transfer)
     # ── Interest ──────────────────────────────────────────────────────────
-    ("Net Interest Paid", "INT"),       # ★ daily interest on savings/deposit
-    ("Withheld Tax Refund", "INT"),     # ★ tax refund on interest (Freistellungsauftrag)
-    ("Interest earned", "INT"),         # ○ alternate interest label
+    ("Net Interest Paid", "INT"),  # ★ daily interest on savings/deposit
+    ("Withheld Tax Refund", "INT"),  # ★ tax refund on interest (Freistellungsauftrag)
+    ("Interest earned", "INT"),  # ○ alternate interest label
     # ── Fees and charges ──────────────────────────────────────────────────
-    ("Premium plan fee", "FEE"),        # ★ monthly subscription fee
-    ("Plus plan fee", "FEE"),           # ★ monthly subscription fee (Plus tier)
+    ("Premium plan fee", "FEE"),  # ★ monthly subscription fee
+    ("Plus plan fee", "FEE"),  # ★ monthly subscription fee (Plus tier)
     # ── Currency exchange ─────────────────────────────────────────────────
-    ("Exchanged to", "XFER"),           # ★ currency exchange (outgoing leg)
-    ("Exchanged from", "XFER"),         # ○ currency exchange (incoming leg)
+    ("Exchanged to", "XFER"),  # ★ currency exchange (outgoing leg)
+    ("Exchanged from", "XFER"),  # ○ currency exchange (incoming leg)
     # ── Internal savings moves ────────────────────────────────────────────
-    ("To EUR", "XFER"),                 # ★ move to savings vault / pocket
-    ("From EUR", "XFER"),              # ★ move from savings vault / pocket
+    ("To EUR", "XFER"),  # ★ move to savings vault / pocket
+    ("From EUR", "XFER"),  # ★ move from savings vault / pocket
     # ── Pockets ───────────────────────────────────────────────────────────
-    ("To pocket", "XFER"),              # ★ move money into a pocket
-    ("Pocket Withdrawal", "XFER"),      # ★ withdraw money from a pocket
+    ("To pocket", "XFER"),  # ★ move money into a pocket
+    ("Pocket Withdrawal", "XFER"),  # ★ withdraw money from a pocket
     # ── ATM ───────────────────────────────────────────────────────────────
-    ("Cash withdrawal at", "ATM"),      # ★ ATM cash withdrawal
+    ("Cash withdrawal at", "ATM"),  # ★ ATM cash withdrawal
     # ── Top-ups ───────────────────────────────────────────────────────────
-    ("Top-up by", "DEP"),               # ★ incoming top-up
+    ("Top-up by", "DEP"),  # ★ incoming top-up
     # ── Plan refunds ─────────────────────────────────────────────────────
-    ("Plan termination refund", "FEE"), # ★ refund of a cancelled plan
+    ("Plan termination refund", "FEE"),  # ★ refund of a cancelled plan
 ]
 
 
@@ -601,7 +772,9 @@ class RevolutPDFParser(AbstractStatementParser):
         statement.currency = self.currency
         logger.info(
             "Extracted %d total transactions, %d match account=%r",
-            len(raw_transactions), len(filtered), self.account_filter,
+            len(raw_transactions),
+            len(filtered),
+            self.account_filter,
         )
 
         for raw in filtered:
@@ -618,10 +791,14 @@ class RevolutPDFParser(AbstractStatementParser):
             if filtered[0].balance:
                 first_amount = (
                     -_parse_amount(filtered[0].money_out)
-                    if filtered[0].money_out and _is_primary_amount(filtered[0].money_out, cur)
-                    else _parse_amount(filtered[0].money_in)
-                    if filtered[0].money_in and _is_primary_amount(filtered[0].money_in, cur)
-                    else Decimal("0")
+                    if filtered[0].money_out
+                    and _is_primary_amount(filtered[0].money_out, cur)
+                    else (
+                        _parse_amount(filtered[0].money_in)
+                        if filtered[0].money_in
+                        and _is_primary_amount(filtered[0].money_in, cur)
+                        else Decimal("0")
+                    )
                 )
                 first_balance = _parse_amount(filtered[0].balance)
                 statement.start_balance = first_balance - first_amount
@@ -629,7 +806,11 @@ class RevolutPDFParser(AbstractStatementParser):
                 statement.end_balance = _parse_amount(filtered[-1].balance)
             logger.info(
                 "Statement: %s to %s, %d lines, start_balance=%s, end_balance=%s",
-                statement.start_date.strftime("%Y-%m-%d") if statement.start_date else "?",
+                (
+                    statement.start_date.strftime("%Y-%m-%d")
+                    if statement.start_date
+                    else "?"
+                ),
                 statement.end_date.strftime("%Y-%m-%d") if statement.end_date else "?",
                 len(statement.lines),
                 statement.start_balance,
@@ -656,13 +837,15 @@ class RevolutPDFParser(AbstractStatementParser):
         if acct in ("current", "deposit"):
             section_type = "Deposit" if acct == "deposit" else "Account"
             return [
-                t for t in raw_transactions
+                t
+                for t in raw_transactions
                 if t.section.lower() == section_type.lower() and t.owner is None
             ]
 
         # Sub-account: match owner name case-insensitively, include all sections
         return [
-            t for t in raw_transactions
+            t
+            for t in raw_transactions
             if t.owner is not None and t.owner.lower() == acct
         ]
 
@@ -680,13 +863,22 @@ class RevolutPDFParser(AbstractStatementParser):
             self._n_pages = len(pdf.pages)
             first_page_text = pdf.pages[0].extract_text() or ""
             self._extract_header_info(first_page_text)
-            logger.info("PDF: %d page(s), currency=%s, account_id=%s",
-                        self._n_pages, self.currency, self.account_id or "(not set)")
+            logger.info(
+                "PDF: %d page(s), currency=%s, account_id=%s",
+                self._n_pages,
+                self.currency,
+                self.account_id or "(not set)",
+            )
 
             for page_num, page in enumerate(pdf.pages, 1):
                 words = page.extract_words(keep_blank_chars=True)
                 word_lines = self._group_words_by_line(words)
-                logger.debug("  Page %d/%d: %d word-lines", page_num, self._n_pages, len(word_lines))
+                logger.debug(
+                    "  Page %d/%d: %d word-lines",
+                    page_num,
+                    self._n_pages,
+                    len(word_lines),
+                )
 
                 for y, line_words in sorted(word_lines.items()):
                     line_text = " ".join(
@@ -705,8 +897,11 @@ class RevolutPDFParser(AbstractStatementParser):
                         self._sections_seen += 1
                         logger.debug(
                             "  Page %d: section=%r owner=%r (%s to %s)",
-                            page_num, current_section, current_owner,
-                            m.group(3), m.group(4),
+                            page_num,
+                            current_section,
+                            current_owner,
+                            m.group(3),
+                            m.group(4),
                         )
                         continue
 
@@ -761,16 +956,24 @@ class RevolutPDFParser(AbstractStatementParser):
 
                         # Filter secondary-currency amounts (keep only primary)
                         cur = self.currency
-                        if money_out_text and not _is_primary_amount(money_out_text, cur):
+                        if money_out_text and not _is_primary_amount(
+                            money_out_text, cur
+                        ):
                             logger.debug(
                                 "  Skipping non-%s money_out %r on %s %s",
-                                cur, money_out_text, date_text, desc_text,
+                                cur,
+                                money_out_text,
+                                date_text,
+                                desc_text,
                             )
                             money_out_text = None
                         if money_in_text and not _is_primary_amount(money_in_text, cur):
                             logger.debug(
                                 "  Skipping non-%s money_in %r on %s %s",
-                                cur, money_in_text, date_text, desc_text,
+                                cur,
+                                money_in_text,
+                                date_text,
+                                desc_text,
                             )
                             money_in_text = None
 
@@ -834,7 +1037,9 @@ class RevolutPDFParser(AbstractStatementParser):
             logger.debug(
                 "Header row incomplete (desc=%s, money=%s, balance=%s) — "
                 "keeping existing thresholds",
-                desc_x, money_positions, balance_x,
+                desc_x,
+                money_positions,
+                balance_x,
             )
             return
 
@@ -853,7 +1058,10 @@ class RevolutPDFParser(AbstractStatementParser):
                 "Calibration produced non-monotonic thresholds "
                 "(desc=%.1f money_out=%.1f money_in=%.1f balance=%.1f) — "
                 "keeping previous values",
-                new_desc_x, new_money_out_x, new_money_in_x, new_balance_x,
+                new_desc_x,
+                new_money_out_x,
+                new_money_in_x,
+                new_balance_x,
             )
             return
 
@@ -864,7 +1072,10 @@ class RevolutPDFParser(AbstractStatementParser):
 
         logger.debug(
             "Calibrated columns: desc=%.1f money_out=%.1f money_in=%.1f balance=%.1f",
-            self._desc_x, self._money_out_x, self._money_in_x, self._balance_x,
+            self._desc_x,
+            self._money_out_x,
+            self._money_in_x,
+            self._balance_x,
         )
 
     def _extract_header_info(self, first_page_text: str) -> None:
@@ -919,8 +1130,11 @@ class RevolutPDFParser(AbstractStatementParser):
             sl.amount = Decimal("0")
             logger.warning(
                 "Transaction on %s has no %s amount: %r (out=%r, in=%r)",
-                raw.date_str, cur, raw.description,
-                raw.money_out, raw.money_in,
+                raw.date_str,
+                cur,
+                raw.description,
+                raw.money_out,
+                raw.money_in,
             )
 
         sl.memo = raw.description
@@ -936,13 +1150,15 @@ class RevolutPDFParser(AbstractStatementParser):
             sl.trntype = "CREDIT"
             logger.debug(
                 "No type-map match for %r — falling back to CREDIT (amount=%s)",
-                raw.description, sl.amount,
+                raw.description,
+                sl.amount,
             )
         else:
             sl.trntype = "DEBIT"
             logger.debug(
                 "No type-map match for %r — falling back to DEBIT (amount=%s)",
-                raw.description, sl.amount,
+                raw.description,
+                sl.amount,
             )
 
         return sl

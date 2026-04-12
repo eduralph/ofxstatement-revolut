@@ -30,10 +30,10 @@ logger = logging.getLogger(__name__)
 # First match wins. Hedges against a future Revolut format change so one
 # wording tweak doesn't silently drop every row.
 _DATE_FORMATS: Tuple[str, ...] = (
-    "%Y-%m-%d %H:%M:%S",      # 2025-01-15 10:30:00 (current Revolut format)
-    "%Y-%m-%dT%H:%M:%S",      # 2025-01-15T10:30:00 (ISO 8601)
-    "%Y-%m-%dT%H:%M:%S.%f",   # 2025-01-15T10:30:00.123456
-    "%Y-%m-%d",               # date-only
+    "%Y-%m-%d %H:%M:%S",  # 2025-01-15 10:30:00 (current Revolut format)
+    "%Y-%m-%dT%H:%M:%S",  # 2025-01-15T10:30:00 (ISO 8601)
+    "%Y-%m-%dT%H:%M:%S.%f",  # 2025-01-15T10:30:00.123456
+    "%Y-%m-%d",  # date-only
 )
 
 # State values that mean "this transaction settled and should be imported".
@@ -84,6 +84,7 @@ def _parse_csv_amount(s: str) -> Decimal:
 
     return Decimal(s)
 
+
 # ── CSV column resolution ────────────────────────────────────────────────────
 #
 # Revolut's current CSV header is:
@@ -101,87 +102,108 @@ def _parse_csv_amount(s: str) -> Decimal:
 # renames "Amount" to "Betrag" we pick it up without code changes.
 _FIELD_ALIASES: Dict[str, List[str]] = {
     "type": [
-        "Type",                                    # EN
-        "Typ",                                     # DE / PL
-        "Type",                                    # FR / NL
-        "Tipo",                                    # ES / IT / PT
+        "Type",  # EN
+        "Typ",  # DE / PL
+        "Type",  # FR / NL
+        "Tipo",  # ES / IT / PT
     ],
     "product": [
-        "Product",                                 # EN
-        "Produkt",                                 # DE / PL
-        "Produit",                                 # FR
-        "Producto",                                # ES
-        "Prodotto",                                # IT
-        "Produto",                                 # PT
+        "Product",  # EN
+        "Produkt",  # DE / PL
+        "Produit",  # FR
+        "Producto",  # ES
+        "Prodotto",  # IT
+        "Produto",  # PT
     ],
     "started": [
-        "Started Date", "Start Date",              # EN
-        "Startdatum",                              # DE / NL
-        "Date de début", "Date de debut",          # FR
-        "Fecha de inicio",                         # ES
-        "Data di inizio",                          # IT
-        "Data de início", "Data de inicio",        # PT
-        "Data rozpoczęcia", "Data rozpoczecia",    # PL
+        "Started Date",
+        "Start Date",  # EN
+        "Startdatum",  # DE / NL
+        "Date de début",
+        "Date de debut",  # FR
+        "Fecha de inicio",  # ES
+        "Data di inizio",  # IT
+        "Data de início",
+        "Data de inicio",  # PT
+        "Data rozpoczęcia",
+        "Data rozpoczecia",  # PL
     ],
     "completed": [
-        "Completed Date", "Completion Date",       # EN
-        "Abschlussdatum", "Buchungsdatum",         # DE
-        "Date d'achèvement", "Date d'achevement",  # FR
-        "Fecha de finalización",                   # ES
-        "Data di completamento",                   # IT
-        "Data de conclusão", "Data de conclusao",  # PT
-        "Afgerond op",                             # NL
-        "Data zakończenia", "Data zakonczenia",    # PL
+        "Completed Date",
+        "Completion Date",  # EN
+        "Abschlussdatum",
+        "Buchungsdatum",  # DE
+        "Date d'achèvement",
+        "Date d'achevement",  # FR
+        "Fecha de finalización",  # ES
+        "Data di completamento",  # IT
+        "Data de conclusão",
+        "Data de conclusao",  # PT
+        "Afgerond op",  # NL
+        "Data zakończenia",
+        "Data zakonczenia",  # PL
     ],
     "description": [
-        "Description",                             # EN / FR
-        "Beschreibung",                            # DE
-        "Descripción", "Descripcion",              # ES
-        "Descrizione",                             # IT
-        "Descrição", "Descricao",                  # PT
-        "Omschrijving",                            # NL
-        "Opis",                                    # PL
+        "Description",  # EN / FR
+        "Beschreibung",  # DE
+        "Descripción",
+        "Descripcion",  # ES
+        "Descrizione",  # IT
+        "Descrição",
+        "Descricao",  # PT
+        "Omschrijving",  # NL
+        "Opis",  # PL
     ],
     "amount": [
-        "Amount",                                  # EN
-        "Betrag",                                  # DE
-        "Montant",                                 # FR
-        "Importe", "Cantidad",                     # ES
-        "Importo",                                 # IT
-        "Valor", "Montante",                       # PT
-        "Bedrag",                                  # NL
-        "Kwota",                                   # PL
+        "Amount",  # EN
+        "Betrag",  # DE
+        "Montant",  # FR
+        "Importe",
+        "Cantidad",  # ES
+        "Importo",  # IT
+        "Valor",
+        "Montante",  # PT
+        "Bedrag",  # NL
+        "Kwota",  # PL
     ],
     "fee": [
-        "Fee",                                     # EN
-        "Gebühr", "Gebuehr",                       # DE
-        "Frais",                                   # FR
-        "Tarifa", "Comisión", "Comision",          # ES
-        "Commissione",                             # IT
-        "Taxa",                                    # PT
-        "Kosten",                                  # NL
-        "Opłata", "Oplata",                        # PL
+        "Fee",  # EN
+        "Gebühr",
+        "Gebuehr",  # DE
+        "Frais",  # FR
+        "Tarifa",
+        "Comisión",
+        "Comision",  # ES
+        "Commissione",  # IT
+        "Taxa",  # PT
+        "Kosten",  # NL
+        "Opłata",
+        "Oplata",  # PL
     ],
     "currency": [
-        "Currency",                                # EN
-        "Währung", "Waehrung",                     # DE
-        "Devise",                                  # FR
-        "Moneda", "Divisa",                        # ES
-        "Valuta",                                  # IT / NL
-        "Moeda",                                   # PT
-        "Waluta",                                  # PL
+        "Currency",  # EN
+        "Währung",
+        "Waehrung",  # DE
+        "Devise",  # FR
+        "Moneda",
+        "Divisa",  # ES
+        "Valuta",  # IT / NL
+        "Moeda",  # PT
+        "Waluta",  # PL
     ],
     "state": [
-        "State", "Status",                         # EN
-        "Status",                                  # DE / NL / PL
-        "État", "Etat",                            # FR
-        "Estado",                                  # ES / PT
-        "Stato",                                   # IT
+        "State",
+        "Status",  # EN
+        "Status",  # DE / NL / PL
+        "État",
+        "Etat",  # FR
+        "Estado",  # ES / PT
+        "Stato",  # IT
     ],
     "balance": [
-        "Balance",                                 # EN / FR
-        "Saldo",                                   # DE / ES / IT / PT / NL / PL
-        "Solde",                                   # FR (alt.)
+        "Balance",  # EN / FR
+        "Saldo",  # DE / ES / IT / PT / NL / PL
+        "Solde",  # FR (alt.)
     ],
 }
 
@@ -225,6 +247,7 @@ def _resolve_columns(header: List[str]) -> Dict[str, int]:
         )
     return resolved
 
+
 # ── OFX transaction type mapping ─────────────────────────────────────────────
 #
 # Maps the Revolut CSV "Type" column value to an OFX ttype string.
@@ -234,26 +257,26 @@ def _resolve_columns(header: List[str]) -> Dict[str, int]:
 # If you encounter a misclassified transaction, please open an issue.
 CSV_TXN_TYPE_MAP: List[Tuple[str, str]] = [
     # ── Transfers ─────────────────────────────────────────────────────────
-    ("Transfer", "XFER"),           # ★ SEPA transfers, internal moves, person-to-person
+    ("Transfer", "XFER"),  # ★ SEPA transfers, internal moves, person-to-person
     # ── Card payments ─────────────────────────────────────────────────────
-    ("Card Payment", "POS"),        # ★ card purchase (VISA/Mastercard)
+    ("Card Payment", "POS"),  # ★ card purchase (VISA/Mastercard)
     # ── Top-ups ───────────────────────────────────────────────────────────
-    ("Topup", "DEP"),               # ★ incoming top-up (bank transfer in)
+    ("Topup", "DEP"),  # ★ incoming top-up (bank transfer in)
     # ── Currency exchange ─────────────────────────────────────────────────
-    ("Exchange", "XFER"),           # ★ currency exchange
+    ("Exchange", "XFER"),  # ★ currency exchange
     # ── Fees and charges ──────────────────────────────────────────────────
-    ("Fee", "FEE"),                 # ★ subscription fee (Plus plan, etc.)
-    ("Charge", "FEE"),              # ★ fees (Premium plan, etc.)
-    ("Charge Refund", "FEE"),       # ★ refund of a prior charge (negative fee)
+    ("Fee", "FEE"),  # ★ subscription fee (Plus plan, etc.)
+    ("Charge", "FEE"),  # ★ fees (Premium plan, etc.)
+    ("Charge Refund", "FEE"),  # ★ refund of a prior charge (negative fee)
     # ── Interest ──────────────────────────────────────────────────────────
-    ("Interest", "INT"),            # ★ interest earned on deposits
+    ("Interest", "INT"),  # ★ interest earned on deposits
     # ── ATM ───────────────────────────────────────────────────────────────
-    ("ATM", "ATM"),                 # ★ cash withdrawal
+    ("ATM", "ATM"),  # ★ cash withdrawal
     # ── Rewards ───────────────────────────────────────────────────────────
-    ("Reward", "CREDIT"),           # ○ cashback or promotional rewards
+    ("Reward", "CREDIT"),  # ○ cashback or promotional rewards
     # ── Refunds ───────────────────────────────────────────────────────────
-    ("Card Refund", "CREDIT"),      # ★ card payment refund from merchant
-    ("Refund", "CREDIT"),           # ○ other merchant refund
+    ("Card Refund", "CREDIT"),  # ★ card payment refund from merchant
+    ("Refund", "CREDIT"),  # ○ other merchant refund
 ]
 
 
@@ -336,7 +359,9 @@ class RevolutCSVParser(AbstractStatementParser):
             if len(row) <= max_index:
                 logger.debug(
                     "Row %d: too few columns (%d, need > %d), skipping",
-                    row_num, len(row), max_index,
+                    row_num,
+                    len(row),
+                    max_index,
                 )
                 skipped_short += 1
                 continue
@@ -356,7 +381,9 @@ class RevolutCSVParser(AbstractStatementParser):
             if state.upper() not in _ACCEPTED_STATES:
                 logger.debug(
                     "Row %d: skipping state=%r (%s)",
-                    row_num, state, row[cols["description"]].strip(),
+                    row_num,
+                    state,
+                    row[cols["description"]].strip(),
                 )
                 skipped_state += 1
                 continue
@@ -364,7 +391,9 @@ class RevolutCSVParser(AbstractStatementParser):
             if row_currency and row_currency != self.currency:
                 logger.debug(
                     "Row %d: skipping currency=%r (want %s)",
-                    row_num, row_currency, self.currency,
+                    row_num,
+                    row_currency,
+                    self.currency,
                 )
                 skipped_currency += 1
                 continue
@@ -384,7 +413,10 @@ class RevolutCSVParser(AbstractStatementParser):
                 "(product=%d, state=%d, currency=%d, parse=%d)",
                 len(statement.lines),
                 skipped_product + skipped_state + skipped_currency + skipped_parse,
-                skipped_product, skipped_state, skipped_currency, skipped_parse,
+                skipped_product,
+                skipped_state,
+                skipped_currency,
+                skipped_parse,
             )
 
         if statement.lines:
@@ -397,7 +429,11 @@ class RevolutCSVParser(AbstractStatementParser):
                 statement.start_balance = self._first_balance - first_sl.amount
             logger.info(
                 "Statement: %s to %s, %d lines, start_balance=%s, end_balance=%s",
-                statement.start_date.strftime("%Y-%m-%d") if statement.start_date else "?",
+                (
+                    statement.start_date.strftime("%Y-%m-%d")
+                    if statement.start_date
+                    else "?"
+                ),
                 statement.end_date.strftime("%Y-%m-%d") if statement.end_date else "?",
                 len(statement.lines),
                 statement.start_balance,
@@ -410,7 +446,8 @@ class RevolutCSVParser(AbstractStatementParser):
                 "No transactions emitted for account=%r in %s. "
                 "Products seen: %s. States seen: %s. Currencies seen: %s. "
                 "Accepted states are %s (case-insensitive).",
-                self.account_filter, self.filename,
+                self.account_filter,
+                self.filename,
                 dict(products_seen) or "(none)",
                 dict(states_seen) or "(none)",
                 dict(currencies_seen) or "(none)",
@@ -423,7 +460,10 @@ class RevolutCSVParser(AbstractStatementParser):
         return product.lower() == self.account_filter.lower()
 
     def _detect_currency(
-        self, rows: List[List[str]], cols: Dict[str, int], max_index: int,
+        self,
+        rows: List[List[str]],
+        cols: Dict[str, int],
+        max_index: int,
     ) -> Optional[str]:
         """Return the dominant currency in rows matching the account filter.
 
@@ -455,13 +495,17 @@ class RevolutCSVParser(AbstractStatementParser):
             logger.warning(
                 "CSV contains multiple currencies %s — using %s; set "
                 "`currency` in config to override.",
-                dict(counts), dominant,
+                dict(counts),
+                dominant,
             )
         logger.debug("Detected currency %s from CSV", dominant)
         return dominant
 
     def _parse_row(
-        self, row: List[str], row_num: int, cols: Dict[str, int],
+        self,
+        row: List[str],
+        row_num: int,
+        cols: Dict[str, int],
     ) -> Optional[StatementLine]:
         sl = StatementLine()
 
@@ -471,7 +515,9 @@ class RevolutCSVParser(AbstractStatementParser):
             sl.date = _parse_csv_date(date_str)
         except ValueError:
             logger.warning(
-                "Row %d: cannot parse date %r, skipping", row_num, date_str,
+                "Row %d: cannot parse date %r, skipping",
+                row_num,
+                date_str,
             )
             return None
 
@@ -488,12 +534,18 @@ class RevolutCSVParser(AbstractStatementParser):
                     sl.amount -= fee
                     logger.debug(
                         "Row %d: amount=%s fee=%s → net=%s (%s)",
-                        row_num, amount_str, fee_str, sl.amount, sl.memo,
+                        row_num,
+                        amount_str,
+                        fee_str,
+                        sl.amount,
+                        sl.memo,
                     )
         except Exception:
             logger.warning(
                 "Row %d: cannot parse amount=%r fee=%r, skipping",
-                row_num, amount_str, fee_str,
+                row_num,
+                amount_str,
+                fee_str,
             )
             return None
 
@@ -519,13 +571,17 @@ class RevolutCSVParser(AbstractStatementParser):
             sl.trntype = "CREDIT"
             logger.debug(
                 "Row %d: unknown CSV type %r for %r — falling back to CREDIT",
-                row_num, txn_type, sl.memo,
+                row_num,
+                txn_type,
+                sl.memo,
             )
         else:
             sl.trntype = "DEBIT"
             logger.debug(
                 "Row %d: unknown CSV type %r for %r — falling back to DEBIT",
-                row_num, txn_type, sl.memo,
+                row_num,
+                txn_type,
+                sl.memo,
             )
 
         return sl
