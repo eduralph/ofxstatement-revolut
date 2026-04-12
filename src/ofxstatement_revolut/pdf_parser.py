@@ -18,7 +18,7 @@ import logging
 import re
 from datetime import datetime
 from decimal import Decimal
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Set, Tuple
 
 import pdfplumber
 
@@ -27,26 +27,406 @@ from ofxstatement.statement import Statement, StatementLine
 
 logger = logging.getLogger(__name__)
 
-# ── X-coordinate thresholds for column detection ─────────────────────────────
-# Derived from PDF layout analysis of Revolut EUR statements.
-# Words with x0 < _DESC_X land in the Date column, etc.
-_DESC_X = 120
-_MONEY_OUT_X = 300
-_MONEY_IN_X = 400
-_BALANCE_X = 500
+# ── Default x-coordinate thresholds for column detection ─────────────────────
+# Used until the parser sees a "Date Description Money out Money in Balance"
+# header row, at which point the thresholds are recalibrated from the actual
+# header word positions. This makes the parser tolerant of minor layout shifts
+# between Revolut PDF versions.
+_DEFAULT_DESC_X = 120
+_DEFAULT_MONEY_OUT_X = 300
+_DEFAULT_MONEY_IN_X = 400
+_DEFAULT_BALANCE_X = 500
+
+# ── Multi-language month names ───────────────────────────────────────────────
+#
+# strptime's %b/%B are locale-sensitive and fail silently on non-English month
+# names (a German "15. Januar 2025" wouldn't parse in a C-locale process).
+# This lookup table is explicit and locale-independent. Keys are lowercased
+# month names or abbreviations in every language Revolut is known to localize
+# into; values are the month number (1–12). Add new languages here as needed.
+_MONTH_NAME_TABLE: Tuple[Tuple[str, int], ...] = (
+    # English
+    ("jan", 1), ("january", 1), ("feb", 2), ("february", 2),
+    ("mar", 3), ("march", 3), ("apr", 4), ("april", 4),
+    ("may", 5), ("jun", 6), ("june", 6), ("jul", 7), ("july", 7),
+    ("aug", 8), ("august", 8), ("sep", 9), ("sept", 9), ("september", 9),
+    ("oct", 10), ("october", 10), ("nov", 11), ("november", 11),
+    ("dec", 12), ("december", 12),
+    # German
+    ("januar", 1), ("jän", 1), ("jänner", 1),
+    ("februar", 2),
+    ("mär", 3), ("märz", 3),
+    ("mai", 5),
+    ("juni", 6), ("juli", 7),
+    ("okt", 10), ("oktober", 10),
+    ("dez", 12), ("dezember", 12),
+    # French
+    ("janv", 1), ("janvier", 1),
+    ("févr", 2), ("fevr", 2), ("février", 2), ("fevrier", 2),
+    ("mars", 3),
+    ("avr", 4), ("avril", 4),
+    ("juin", 6), ("juil", 7), ("juillet", 7),
+    ("août", 8), ("aout", 8),
+    ("septembre", 9), ("octobre", 10),
+    ("novembre", 11),
+    ("déc", 12), ("décembre", 12), ("decembre", 12),
+    # Spanish
+    ("ene", 1), ("enero", 1),
+    ("febrero", 2), ("marzo", 3),
+    ("abr", 4), ("abril", 4),
+    ("mayo", 5), ("junio", 6), ("julio", 7),
+    ("ago", 8), ("agosto", 8),
+    ("septiembre", 9), ("octubre", 10),
+    ("noviembre", 11), ("dic", 12), ("diciembre", 12),
+    # Italian
+    ("gen", 1), ("gennaio", 1), ("febbraio", 2),
+    ("aprile", 4), ("mag", 5), ("maggio", 5),
+    ("giu", 6), ("giugno", 6), ("lug", 7), ("luglio", 7),
+    ("set", 9), ("sett", 9), ("settembre", 9),
+    ("ott", 10), ("ottobre", 10), ("dicembre", 12),
+    # Portuguese
+    ("janeiro", 1), ("fev", 2), ("fevereiro", 2),
+    ("março", 3), ("marco", 3),
+    ("maio", 5), ("junho", 6), ("julho", 7),
+    ("set", 9), ("setembro", 9),
+    ("out", 10), ("outubro", 10),
+    ("novembro", 11), ("dez", 12), ("dezembro", 12),
+    # Dutch
+    ("januari", 1), ("februari", 2),
+    ("mrt", 3), ("maart", 3),
+    ("mei", 5), ("juni", 6), ("juli", 7),
+    ("augustus", 8), ("okt", 10),
+    # Polish (nominative + genitive — Polish dates use genitive: "15 stycznia")
+    ("sty", 1), ("styczeń", 1), ("styczen", 1), ("stycznia", 1),
+    ("lut", 2), ("luty", 2), ("lutego", 2),
+    ("marzec", 3), ("marca", 3),
+    ("kwi", 4), ("kwiecień", 4), ("kwiecien", 4), ("kwietnia", 4),
+    ("maj", 5), ("maja", 5),
+    ("cze", 6), ("czerwiec", 6), ("czerwca", 6),
+    ("lip", 7), ("lipiec", 7), ("lipca", 7),
+    ("sie", 8), ("sierpień", 8), ("sierpien", 8), ("sierpnia", 8),
+    ("wrz", 9), ("wrzesień", 9), ("wrzesien", 9), ("września", 9), ("wrzesnia", 9),
+    ("paź", 10), ("paz", 10),
+    ("październik", 10), ("pazdziernik", 10),
+    ("października", 10), ("pazdziernika", 10),
+    ("lis", 11), ("listopad", 11), ("listopada", 11),
+    ("gru", 12), ("grudzień", 12), ("grudzien", 12), ("grudnia", 12),
+)
+
+# Built from _MONTH_NAME_TABLE. Collisions across languages are allowed as
+# long as they map to the same number (checked at module load time).
+_MONTH_NAMES: Dict[str, int] = {}
+for _name, _num in _MONTH_NAME_TABLE:
+    if _MONTH_NAMES.setdefault(_name, _num) != _num:
+        raise AssertionError(f"Month name collision: {_name!r}")
+
 
 # ── Regex patterns ───────────────────────────────────────────────────────────
 
-_SECTION_RE = re.compile(
-    r"^(?:(\w+)'s )?"
-    r"(Account|account|Deposit) transactions from "
-    r"(\w+ \d{1,2}, \d{4}) to (\w+ \d{1,2}, \d{4})$"
+# Letter-like character (Unicode-aware, excludes digits and underscore) — used
+# in date / header patterns so they match non-ASCII month names like "Januar",
+# "févr", "março", "październik".
+_L = r"[^\W\d_]"
+
+# Transaction-date formats, language-neutral. Month-name variants use the
+# _MONTH_NAMES lookup below (locale-independent); numeric variants go through
+# strptime. The regex serves as a gatekeeper — "is this line a transaction
+# date?" — and accepts any letter sequence in the month-name slot. Actual
+# validation happens in _parse_date.
+_DATE_RE = re.compile(
+    r"^(?:"
+    rf"{_L}+\.?\s\d{{1,2}},\s\d{{4}}"          # Jan 15, 2025 / enero 15, 2025
+    rf"|\d{{1,2}}\.?\s{_L}+\.?\s\d{{4}}"       # 15 Jan 2025 / 15. Januar 2025
+    r"|\d{4}-\d{2}-\d{2}"                       # 2025-01-15
+    r"|\d{1,2}/\d{1,2}/\d{4}"                   # 15/01/2025
+    r")$"
 )
 
-_DATE_RE = re.compile(r"^[A-Z][a-z]{2} \d{1,2}, \d{4}$")
-_HEADER_RE = re.compile(r"^Date\s+Description\s+Money out\s+Money in\s+Balance$")
+# Numeric-only strptime formats. Month-name formats bypass strptime entirely
+# (see _parse_date) so we avoid %b's locale dependency.
+_NUMERIC_DATE_FORMATS: Tuple[str, ...] = (
+    "%Y-%m-%d",
+    "%d/%m/%Y",
+)
+
+# Captures the three components of a month-name date in either order.
+_MONTH_NAME_DATE_RE = re.compile(
+    rf"^(?:"
+    rf"({_L}+)\.?\s(\d{{1,2}}),\s(\d{{4}})"
+    rf"|(\d{{1,2}})\.?\s({_L}+)\.?\s(\d{{4}})"
+    rf")$"
+)
+
+_SECTION_DATE_PATTERN = (
+    rf"(?:"
+    rf"{_L}+\.?\s\d{{1,2}},\s\d{{4}}"
+    rf"|\d{{1,2}}\.?\s{_L}+\.?\s\d{{4}}"
+    r"|\d{4}-\d{2}-\d{2}"
+    r"|\d{1,2}/\d{1,2}/\d{4}"
+    r")"
+)
+
+# Connectors used in "<date> to <date>" ranges across supported languages.
+# Broadened from the English "to" alone. Matched case-insensitively.
+_SECTION_CONNECTOR = (
+    r"(?:to|bis|au|à|até|hasta|al|a|tot|do|-)"
+)
+
+# Words that introduce a section (equivalent of English "Account" / "Deposit").
+# Only the language-specific labels; the structural regex below does not
+# require the exact English phrase "transactions from".
+# Section-type word lists, one per canonical English label. _SECTION_RE
+# matches either set; _canonical_section() maps the matched word back to
+# "Account" or "Deposit" so downstream filtering stays language-independent.
+_SECTION_ACCOUNT_ALIASES: Tuple[str, ...] = (
+    "Account", "Konto", "Compte", "Cuenta", "Conto", "Conta",
+    "Rekening", "Rachunek",
+)
+_SECTION_DEPOSIT_ALIASES: Tuple[str, ...] = (
+    "Deposit", "Savings",
+    "Einlage", "Depot", "Sparkonto",
+    "Dépôt", "Depot", "Epargne", "Épargne",
+    "Depósito", "Deposito", "Ahorro", "Risparmi",
+    "Poupança", "Poupanca",
+    "Spaargeld",
+    "Lokata", "Oszczędności", "Oszczednosci",
+)
+
+_SECTION_ACCOUNT_WORDS = (
+    r"(?:" + "|".join(re.escape(a) for a in _SECTION_ACCOUNT_ALIASES) + r")"
+)
+_SECTION_DEPOSIT_WORDS = (
+    r"(?:" + "|".join(re.escape(a) for a in _SECTION_DEPOSIT_ALIASES) + r")"
+)
+
+_SECTION_ACCOUNT_SET = {a.casefold() for a in _SECTION_ACCOUNT_ALIASES}
+_SECTION_DEPOSIT_SET = {a.casefold() for a in _SECTION_DEPOSIT_ALIASES}
+
+
+def _canonical_section(word: str) -> str:
+    """Map a matched section-type word to its canonical English label."""
+    w = word.casefold()
+    if w in _SECTION_ACCOUNT_SET:
+        return "Account"
+    if w in _SECTION_DEPOSIT_SET:
+        return "Deposit"
+    return word  # unknown — preserve as-is so it surfaces in logs
+
+# Final section-header regex. Format:
+#   [<Owner>'s ] <section-word> <anything> <date> <connector> <date>
+# The "<anything>" middle absorbs language-specific filler like "transactions
+# from" / "Kontotransaktionen" / "transactions du" without needing a per-
+# language alias. Matching is case-insensitive for the section words and
+# connectors so we don't have to enumerate capitalization variants.
+_SECTION_RE = re.compile(
+    r"^(?:(\w+)(?:'s|'s)\s+)?"
+    rf"({_SECTION_ACCOUNT_WORDS}|{_SECTION_DEPOSIT_WORDS})"
+    r"\b[^\n]*?\s"
+    rf"({_SECTION_DATE_PATTERN})"
+    rf"\s{_SECTION_CONNECTOR}\s"
+    rf"({_SECTION_DATE_PATTERN})$",
+    re.IGNORECASE,
+)
+
 _IBAN_RE = re.compile(r"IBAN\s+([A-Z]{2}\d{2}[A-Z0-9]+)")
-_CURRENCY_RE = re.compile(r"^(\w+) Statement$")
+
+# Currency detection. Revolut writes "<CUR> Statement" as a page heading.
+# The word "Statement" is translated on non-English exports, so we accept
+# any of the known localized equivalents. Using an explicit list instead
+# of "<CUR> <any-word>" avoids false matches on lines like "CEO JANE".
+_STATEMENT_WORDS: Tuple[str, ...] = (
+    "Statement",                              # EN
+    "Kontoauszug", "Kontoauszüge",            # DE
+    "Relevé", "Releve",                        # FR
+    "Extracto",                                # ES
+    "Estratto",                                # IT
+    "Extrato",                                 # PT
+    "Afschrift", "Rekeningafschrift",          # NL
+    "Wyciąg", "Wyciag",                        # PL
+)
+_CURRENCY_RE = re.compile(
+    r"^([A-Z]{3})\s+(?:"
+    + "|".join(re.escape(w) for w in _STATEMENT_WORDS)
+    + r")\b.*$",
+    re.MULTILINE,
+)
+_SORT_CODE_RE = re.compile(r"Sort Code\s+(\d{6})")
+_ACCOUNT_NUMBER_RE = re.compile(r"Account Number\s+(\d{6,})")
+
+# ── Column header aliases ────────────────────────────────────────────────────
+#
+# Used both to detect the transaction-table header row AND to calibrate
+# column x-positions from its word coordinates. Aliases are grouped by
+# logical column, with English first followed by translations for every
+# language Revolut is known to localize into. Matching is case-insensitive.
+#
+# Add a new language by appending its column labels to each list. The header
+# detector matches on the *first* token of a multi-word alias (so "Money out"
+# and "Paid out" are distinguished at x-classification time, not at the
+# alias level).
+_HEADER_ALIASES: Dict[str, List[str]] = {
+    "date": [
+        "Date",                                # EN / FR
+        "Datum",                               # DE / NL
+        "Fecha",                               # ES
+        "Data",                                # IT / PT / PL
+    ],
+    "description": [
+        "Description",                         # EN / FR
+        "Details",                             # EN
+        "Beschreibung",                        # DE
+        "Descripción", "Descripcion",          # ES
+        "Descrizione",                         # IT
+        "Descrição", "Descricao",              # PT
+        "Omschrijving",                        # NL
+        "Opis",                                # PL
+        "Libellé", "Libelle",                  # FR (alt.)
+    ],
+    "money_out": [
+        "Money out", "Withdrawals", "Paid out", "Debit",                # EN
+        "Ausgehend", "Ausgänge", "Ausgaenge", "Abhebung", "Soll",       # DE
+        "Débit", "Debit", "Sortie", "Retrait",                          # FR
+        "Débito", "Debito", "Retiros", "Cargo",                         # ES
+        "Uscite", "Prelievi", "Addebito",                               # IT
+        "Saída", "Saida", "Débito", "Retirada",                         # PT
+        "Uit", "Opnames",                                                # NL
+        "Obciążenia", "Obciazenia", "Wypłaty", "Wyplaty",               # PL
+    ],
+    "money_in": [
+        "Money in", "Deposits", "Paid in", "Credit",                    # EN
+        "Eingehend", "Eingänge", "Eingaenge", "Einzahlung", "Haben",    # DE
+        "Crédit", "Credit", "Entrée", "Entree",                         # FR
+        "Crédito", "Credito", "Depósitos", "Depositos", "Abono",        # ES
+        "Entrate", "Versamenti", "Accredito",                           # IT
+        "Entrada", "Depósito", "Deposito",                              # PT
+        "In", "Stortingen",                                              # NL
+        "Uznania", "Wpłaty", "Wplaty",                                  # PL
+    ],
+    "balance": [
+        "Balance",                             # EN / FR
+        "Saldo",                               # DE / ES / IT / PT / NL / PL
+        "Solde",                               # FR
+    ],
+}
+
+# Keywords used by the generic fee fallback when no transaction-type prefix
+# matches. Multilingual so "Gebühr" / "frais" / "tassa" / "tarifa" / "taxa"
+# / "opłata" trigger FEE classification.
+_FEE_WORDS: Tuple[str, ...] = (
+    "fee",                   # EN
+    "gebühr", "gebuhr",      # DE
+    "frais",                 # FR
+    "tarifa", "comisión", "comision",  # ES
+    "tassa", "commissione",  # IT
+    "taxa", "tarifa",        # PT
+    "kosten", "vergoeding",  # NL
+    "opłata", "oplata",      # PL
+)
+_FEE_RE = re.compile(
+    r"\b(?:" + "|".join(re.escape(w) for w in _FEE_WORDS) + r")\b",
+    re.IGNORECASE,
+)
+
+
+def _first_tokens(aliases: List[str]) -> Set[str]:
+    """Lowercased first tokens of each alias, for position-based matching."""
+    return {a.split(" ", 1)[0].casefold() for a in aliases}
+
+
+_HEADER_FIRST_TOKENS: Dict[str, Set[str]] = {
+    col: _first_tokens(_HEADER_ALIASES[col]) for col in _HEADER_ALIASES
+}
+
+
+def _looks_like_header_row(line_text: str) -> bool:
+    """True if `line_text` looks like the transaction-table header row.
+
+    Language-agnostic: requires one token-start alias from each of the five
+    logical columns (date, description, money_out, money_in, balance). Does
+    NOT require a specific word at the line boundary — Revolut's localized
+    PDFs can reorder or split column labels in ways that break a strict
+    startswith/endswith match.
+    """
+    tokens = [t.casefold() for t in line_text.split()]
+    if not tokens:
+        return False
+
+    found: Dict[str, bool] = {col: False for col in _HEADER_ALIASES}
+    # money_out/money_in share first tokens in some languages ("Paid out" /
+    # "Paid in"); count matches separately so "Paid out Paid in" counts as
+    # both columns rather than one.
+    money_matches = 0
+    for tok in tokens:
+        for col in ("date", "description", "balance"):
+            if tok in _HEADER_FIRST_TOKENS[col]:
+                found[col] = True
+        if (
+            tok in _HEADER_FIRST_TOKENS["money_out"]
+            or tok in _HEADER_FIRST_TOKENS["money_in"]
+        ):
+            money_matches += 1
+    return (
+        found["date"]
+        and found["description"]
+        and found["balance"]
+        and money_matches >= 2
+    )
+
+
+def _parse_date(date_str: str) -> datetime:
+    """Parse a transaction date, locale-independently.
+
+    Numeric formats (ISO, DD/MM/YYYY) go through strptime. Month-name
+    formats (both "Jan 15, 2025" and "15 Jan 2025" orders) are matched
+    against the multilingual _MONTH_NAMES table, so a German "15. Januar
+    2025" or French "15 janvier 2025" parses even under a C locale.
+    """
+    date_str = date_str.strip()
+
+    for fmt in _NUMERIC_DATE_FORMATS:
+        try:
+            return datetime.strptime(date_str, fmt)
+        except ValueError:
+            continue
+
+    m = _MONTH_NAME_DATE_RE.match(date_str)
+    if m:
+        if m.group(1) is not None:               # "Month D, YYYY"
+            mon_raw, day, year = m.group(1), m.group(2), m.group(3)
+        else:                                     # "D Month YYYY"
+            day, mon_raw, year = m.group(4), m.group(5), m.group(6)
+        mon = _MONTH_NAMES.get(mon_raw.casefold().rstrip("."))
+        if mon is not None:
+            return datetime(int(year), mon, int(day))
+
+    raise ValueError(f"Unrecognized date format: {date_str!r}")
+
+
+class RevolutPDFFormatError(ValueError):
+    """Raised when the PDF has content but nothing the parser recognises."""
+
+# Currencies Revolut writes with a leading symbol (e.g. "$19.61", "€50.00").
+# Anything not in this map is written with a trailing ISO code
+# (e.g. "29,155.00 TRY", "120.50 CHF").
+_PREFIX_SYMBOLS: Dict[str, str] = {
+    "EUR": "€",
+    "USD": "$",
+    "GBP": "£",
+    "JPY": "¥",
+    "INR": "₹",
+    "AUD": "A$",
+    "CAD": "C$",
+    "NZD": "NZ$",
+}
+
+# All known prefixes, longest first so "A$" matches before "$".
+_ALL_PREFIXES = sorted(set(_PREFIX_SYMBOLS.values()), key=len, reverse=True)
+
+_LEADING_PREFIX_RE = re.compile(
+    r"^(?:" + "|".join(re.escape(p) for p in _ALL_PREFIXES) + r")\s*"
+)
+# Trailing three-letter ISO code, optionally preceded by whitespace.
+_TRAILING_CODE_RE = re.compile(r"\s*[A-Z]{3}$")
 
 # ── OFX transaction type mapping ─────────────────────────────────────────────
 #
@@ -60,6 +440,8 @@ PDF_TXN_TYPE_MAP: List[Tuple[str, str]] = [
     # ── Transfers ─────────────────────────────────────────────────────────
     ("Transfer to", "XFER"),            # ★ outgoing transfer to person/account
     ("Transfer from", "XFER"),          # ★ incoming transfer from person/account
+    ("SWIFT Transfer to", "XFER"),      # ★ outgoing SWIFT / international transfer
+    ("SWIFT Transfer from", "XFER"),    # ○ incoming SWIFT / international transfer
     # ── Incoming payments ─────────────────────────────────────────────────
     ("Payment from", "DEP"),            # ★ incoming payment (SEPA credit transfer)
     # ── Interest ──────────────────────────────────────────────────────────
@@ -88,8 +470,38 @@ PDF_TXN_TYPE_MAP: List[Tuple[str, str]] = [
 
 
 def _parse_amount(text: str) -> Decimal:
-    cleaned = text.replace("€", "").replace(",", "").strip()
+    """Strip leading symbol / trailing ISO code / thousands separators."""
+    cleaned = _LEADING_PREFIX_RE.sub("", text)
+    cleaned = _TRAILING_CODE_RE.sub("", cleaned)
+    cleaned = cleaned.replace(",", "").strip()
     return Decimal(cleaned)
+
+
+def _is_primary_amount(text: str, currency: str) -> bool:
+    """True if `text` is an amount in the given primary currency.
+
+    Prefix currencies match with `startswith(symbol)`;
+    suffix currencies match with `endswith(code)`.
+    """
+    if currency in _PREFIX_SYMBOLS:
+        return text.startswith(_PREFIX_SYMBOLS[currency])
+    return text.rstrip().endswith(currency)
+
+
+def _is_foreign_amount(text: str, currency: str) -> bool:
+    """True if `text` is an amount in a *different* (non-primary) currency.
+
+    Used to discard secondary-currency continuation lines and columns.
+    """
+    if _is_primary_amount(text, currency):
+        return False
+    if _LEADING_PREFIX_RE.match(text):
+        return True
+    # Trailing three-letter code that isn't our currency
+    m = _TRAILING_CODE_RE.search(text)
+    if m and text.rstrip()[-3:] != currency:
+        return True
+    return False
 
 
 def _make_id(date: datetime, amount: Decimal, memo: str) -> str:
@@ -108,8 +520,9 @@ def _match_txn_type(description: str) -> str:
     for prefix, ttype in PDF_TXN_TYPE_MAP:
         if description.lower().startswith(prefix.lower()):
             return ttype
-    # Word-boundary check avoids "Coffee" matching "fee"
-    if re.search(r"\bfee\b", description, re.IGNORECASE):
+    # Multilingual fee-word fallback (EN, DE, FR, ES, IT, PT, NL, PL). Word-
+    # boundary-matched so "Coffee" doesn't spuriously match "fee".
+    if _FEE_RE.search(description):
         return "FEE"
     return ""  # empty = caller should use amount-sign fallback
 
@@ -147,15 +560,45 @@ class RevolutPDFParser(AbstractStatementParser):
         self.account_filter = account
         self.currency = currency
         self.account_id = account_id
+        # Column x-thresholds — recalibrated when the header row is parsed.
+        self._desc_x = _DEFAULT_DESC_X
+        self._money_out_x = _DEFAULT_MONEY_OUT_X
+        self._money_in_x = _DEFAULT_MONEY_IN_X
+        self._balance_x = _DEFAULT_BALANCE_X
+        # Diagnostic counters populated by _extract_all_transactions.
+        self._n_pages = 0
+        self._sections_seen = 0
+        self._header_rows_seen = 0
 
     def parse(self) -> Statement:
         logger.info("Parsing PDF %s", self.filename)
         statement = Statement()
-        statement.currency = self.currency
         statement.bank_id = "Revolut"
 
+        # Header extraction (inside _extract_all_transactions) may update
+        # self.currency and self.account_id, so set them on the statement
+        # afterwards.
         raw_transactions = self._extract_all_transactions()
+
+        # Loud-fail when the PDF has content but we recognised nothing — a
+        # silent empty OFX would make the user think the statement was empty.
+        # Zero transactions WITH section headers is legitimate (empty account).
+        if (
+            not raw_transactions
+            and self._n_pages > 0
+            and self._sections_seen == 0
+            and self._header_rows_seen == 0
+        ):
+            raise RevolutPDFFormatError(
+                f"Could not recognise any transaction table in "
+                f"{self.filename!r}. Pages={self._n_pages}, "
+                f"section_headers=0, header_rows=0. "
+                f"The PDF layout may have changed — please open an issue "
+                f"at https://github.com/eduralph/ofxstatement-revolut/issues."
+            )
+
         filtered = self._filter_transactions(raw_transactions)
+        statement.currency = self.currency
         logger.info(
             "Extracted %d total transactions, %d match account=%r",
             len(raw_transactions), len(filtered), self.account_filter,
@@ -171,12 +614,13 @@ class RevolutPDFParser(AbstractStatementParser):
             statement.start_date = statement.lines[0].date
             statement.end_date = statement.lines[-1].date
             # Derive balances from first and last transaction
+            cur = self.currency
             if filtered[0].balance:
                 first_amount = (
                     -_parse_amount(filtered[0].money_out)
-                    if filtered[0].money_out and filtered[0].money_out.startswith("€")
+                    if filtered[0].money_out and _is_primary_amount(filtered[0].money_out, cur)
                     else _parse_amount(filtered[0].money_in)
-                    if filtered[0].money_in and filtered[0].money_in.startswith("€")
+                    if filtered[0].money_in and _is_primary_amount(filtered[0].money_in, cur)
                     else Decimal("0")
                 )
                 first_balance = _parse_amount(filtered[0].balance)
@@ -229,18 +673,20 @@ class RevolutPDFParser(AbstractStatementParser):
         current_owner: Optional[str] = None
         current_txn: Optional[_RawTransaction] = None
         in_table = False
+        self._sections_seen = 0
+        self._header_rows_seen = 0
 
         with pdfplumber.open(self.filename) as pdf:
-            n_pages = len(pdf.pages)
+            self._n_pages = len(pdf.pages)
             first_page_text = pdf.pages[0].extract_text() or ""
             self._extract_header_info(first_page_text)
             logger.info("PDF: %d page(s), currency=%s, account_id=%s",
-                        n_pages, self.currency, self.account_id or "(not set)")
+                        self._n_pages, self.currency, self.account_id or "(not set)")
 
             for page_num, page in enumerate(pdf.pages, 1):
                 words = page.extract_words(keep_blank_chars=True)
                 word_lines = self._group_words_by_line(words)
-                logger.debug("  Page %d/%d: %d word-lines", page_num, n_pages, len(word_lines))
+                logger.debug("  Page %d/%d: %d word-lines", page_num, self._n_pages, len(word_lines))
 
                 for y, line_words in sorted(word_lines.items()):
                     line_text = " ".join(
@@ -254,8 +700,9 @@ class RevolutPDFParser(AbstractStatementParser):
                             transactions.append(current_txn)
                             current_txn = None
                         current_owner = m.group(1)
-                        current_section = m.group(2)
+                        current_section = _canonical_section(m.group(2))
                         in_table = False
+                        self._sections_seen += 1
                         logger.debug(
                             "  Page %d: section=%r owner=%r (%s to %s)",
                             page_num, current_section, current_owner,
@@ -264,8 +711,10 @@ class RevolutPDFParser(AbstractStatementParser):
                         continue
 
                     # Check for table header
-                    if _HEADER_RE.match(line_text.strip()):
+                    if _looks_like_header_row(line_text):
                         in_table = True
+                        self._header_rows_seen += 1
+                        self._calibrate_from_header(line_words)
                         continue
 
                     if not in_table or current_section is None:
@@ -288,13 +737,13 @@ class RevolutPDFParser(AbstractStatementParser):
 
                     for w in sorted(line_words, key=lambda w: w["x0"]):
                         x = w["x0"]
-                        if x < _DESC_X:
+                        if x < self._desc_x:
                             date_words.append(w["text"])
-                        elif x < _MONEY_OUT_X:
+                        elif x < self._money_out_x:
                             desc_words.append(w["text"])
-                        elif x < _MONEY_IN_X:
+                        elif x < self._money_in_x:
                             money_out_words.append(w["text"])
-                        elif x < _BALANCE_X:
+                        elif x < self._balance_x:
                             money_in_words.append(w["text"])
                         else:
                             balance_words.append(w["text"])
@@ -310,17 +759,18 @@ class RevolutPDFParser(AbstractStatementParser):
                         if current_txn:
                             transactions.append(current_txn)
 
-                        # Filter non-EUR secondary amounts
-                        if money_out_text and not money_out_text.startswith("€"):
+                        # Filter secondary-currency amounts (keep only primary)
+                        cur = self.currency
+                        if money_out_text and not _is_primary_amount(money_out_text, cur):
                             logger.debug(
-                                "  Skipping non-EUR money_out %r on %s %s",
-                                money_out_text, date_text, desc_text,
+                                "  Skipping non-%s money_out %r on %s %s",
+                                cur, money_out_text, date_text, desc_text,
                             )
                             money_out_text = None
-                        if money_in_text and not money_in_text.startswith("€"):
+                        if money_in_text and not _is_primary_amount(money_in_text, cur):
                             logger.debug(
-                                "  Skipping non-EUR money_in %r on %s %s",
-                                money_in_text, date_text, desc_text,
+                                "  Skipping non-%s money_in %r on %s %s",
+                                cur, money_in_text, date_text, desc_text,
                             )
                             money_in_text = None
 
@@ -335,7 +785,7 @@ class RevolutPDFParser(AbstractStatementParser):
                         )
                     elif current_txn and desc_text:
                         # Detail/continuation line - skip secondary currency lines
-                        if not re.match(r"^[\$£¥]\d", desc_text):
+                        if not _is_foreign_amount(desc_text, self.currency):
                             current_txn.detail_lines.append(desc_text)
 
         if current_txn:
@@ -343,16 +793,109 @@ class RevolutPDFParser(AbstractStatementParser):
 
         return transactions
 
-    def _extract_header_info(self, first_page_text: str) -> None:
-        m = _IBAN_RE.search(first_page_text)
-        if m and not self.account_id:
-            self.account_id = m.group(1)
-            logger.debug("IBAN extracted from PDF: %s", self.account_id)
+    def _calibrate_from_header(self, line_words: list) -> None:
+        """Update column x-thresholds from the observed header row.
 
+        Amount columns are right-aligned, so a number's x0 can be *less* than
+        its header word's x0. To keep all numbers in the right bucket we use
+        the midpoint between adjacent header x0's as each threshold (except
+        for the Description threshold, where both neighbours are left-aligned
+        and the header x0 itself works).
+
+        Falls back to keeping existing thresholds if the header words can't be
+        resolved or if the resulting thresholds aren't strictly increasing
+        (which would indicate we mis-identified one of the columns).
+        """
+        desc_x: Optional[float] = None
+        balance_x: Optional[float] = None
+        money_positions: List[float] = []
+
+        desc_first = _HEADER_FIRST_TOKENS["description"]
+        balance_first = _HEADER_FIRST_TOKENS["balance"]
+        money_first = (
+            _HEADER_FIRST_TOKENS["money_out"] | _HEADER_FIRST_TOKENS["money_in"]
+        )
+
+        for w in sorted(line_words, key=lambda w: w["x0"]):
+            # pdfplumber with keep_blank_chars=True returns multi-word labels
+            # like "Money out" as a single word. Match on the first token so
+            # both single-word ("Withdrawals") and multi-word ("Money out")
+            # aliases calibrate identically.
+            first = w["text"].strip().split(" ", 1)[0].casefold()
+            x0 = w["x0"]
+            if desc_x is None and first in desc_first:
+                desc_x = x0
+            elif first in money_first:
+                money_positions.append(x0)
+            elif balance_x is None and first in balance_first:
+                balance_x = x0
+
+        if desc_x is None or len(money_positions) < 2 or balance_x is None:
+            logger.debug(
+                "Header row incomplete (desc=%s, money=%s, balance=%s) — "
+                "keeping existing thresholds",
+                desc_x, money_positions, balance_x,
+            )
+            return
+
+        money_out_x, money_in_x = money_positions[0], money_positions[1]
+        new_desc_x = desc_x
+        new_money_out_x = (desc_x + money_out_x) / 2
+        new_money_in_x = (money_out_x + money_in_x) / 2
+        new_balance_x = (money_in_x + balance_x) / 2
+
+        # Sanity check: thresholds must be strictly left-to-right. Anything
+        # else means we mislabelled a word (e.g. "Balance" appearing before
+        # "Description") and committing these values would misclassify every
+        # subsequent transaction row.
+        if not (new_desc_x < new_money_out_x < new_money_in_x < new_balance_x):
+            logger.warning(
+                "Calibration produced non-monotonic thresholds "
+                "(desc=%.1f money_out=%.1f money_in=%.1f balance=%.1f) — "
+                "keeping previous values",
+                new_desc_x, new_money_out_x, new_money_in_x, new_balance_x,
+            )
+            return
+
+        self._desc_x = new_desc_x
+        self._money_out_x = new_money_out_x
+        self._money_in_x = new_money_in_x
+        self._balance_x = new_balance_x
+
+        logger.debug(
+            "Calibrated columns: desc=%.1f money_out=%.1f money_in=%.1f balance=%.1f",
+            self._desc_x, self._money_out_x, self._money_in_x, self._balance_x,
+        )
+
+    def _extract_header_info(self, first_page_text: str) -> None:
         m = _CURRENCY_RE.search(first_page_text)
         if m:
             self.currency = m.group(1)
             logger.debug("Currency extracted from PDF: %s", self.currency)
+
+        if not self.account_id:
+            self.account_id = self._extract_account_id(first_page_text)
+            if self.account_id:
+                logger.debug("Account ID from PDF: %s", self.account_id)
+
+    def _extract_account_id(self, text: str) -> str:
+        """Extract a stable per-currency account identifier.
+
+        GBP statements use Sort Code + Account Number (UK bank coordinates)
+        and the IBAN field contains the main EUR account — so for GBP we
+        prefer the UK coordinates. For other currencies, the first IBAN
+        wins. Returns empty string if nothing is found.
+        """
+        if self.currency == "GBP":
+            sc = _SORT_CODE_RE.search(text)
+            an = _ACCOUNT_NUMBER_RE.search(text)
+            if sc and an:
+                return f"GB-{sc.group(1)}-{an.group(1)}"
+
+        m = _IBAN_RE.search(text)
+        if m:
+            return m.group(1)
+        return ""
 
     def _group_words_by_line(self, words: list) -> Dict[int, list]:
         lines: Dict[int, list] = {}
@@ -365,17 +908,19 @@ class RevolutPDFParser(AbstractStatementParser):
 
     def _to_statement_line(self, raw: _RawTransaction) -> StatementLine:
         sl = StatementLine()
-        sl.date = datetime.strptime(raw.date_str, "%b %d, %Y")
+        sl.date = _parse_date(raw.date_str)
 
-        if raw.money_out and raw.money_out.startswith("€"):
+        cur = self.currency
+        if raw.money_out and _is_primary_amount(raw.money_out, cur):
             sl.amount = -_parse_amount(raw.money_out)
-        elif raw.money_in and raw.money_in.startswith("€"):
+        elif raw.money_in and _is_primary_amount(raw.money_in, cur):
             sl.amount = _parse_amount(raw.money_in)
         else:
             sl.amount = Decimal("0")
             logger.warning(
-                "Transaction on %s has no EUR amount: %r (out=%r, in=%r)",
-                raw.date_str, raw.description, raw.money_out, raw.money_in,
+                "Transaction on %s has no %s amount: %r (out=%r, in=%r)",
+                raw.date_str, cur, raw.description,
+                raw.money_out, raw.money_in,
             )
 
         sl.memo = raw.description

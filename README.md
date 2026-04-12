@@ -21,6 +21,32 @@ the file extension:
 - **Deposit** (savings / flexible deposit account)
 - **Sub-accounts** (e.g. `Andrew`, `MATTHEW` — PDF only, see [Caveats](#caveats))
 
+## Supported currencies
+
+Multi-currency statements are auto-detected:
+
+- **PDF**: currency is read from the PDF header (`USD Statement`, `TRY Statement`, …).
+- **CSV**: currency is read from the `Currency` column. Revolut exports one
+  CSV per currency account; if a file contains multiple currencies the
+  dominant one is used and the rest are dropped.
+
+Currencies with a well-known symbol are written in PDFs as `<symbol><amount>`
+(e.g. `$19.61`); others are written as `<amount> <CODE>` (e.g. `29,155.00 TRY`).
+
+| Currency | Format     | Account ID                          |
+|----------|------------|-------------------------------------|
+| EUR      | `€100.00`  | IBAN                                |
+| USD      | `$100.00`  | (empty — set `account_id` manually) |
+| GBP      | `£100.00`  | `GB-<sort-code>-<account-number>`   |
+| JPY      | `¥100`     | (empty)                             |
+| INR      | `₹100.00`  | (empty)                             |
+| TRY      | `100.00 TRY` | (empty)                           |
+| Other    | `100.00 XXX` (3-letter code) | (empty)           |
+
+For currencies where Revolut doesn't provide a currency-specific account
+identifier (no IBAN, no Sort Code), leave `account_id` in configuration
+or set it manually per-currency.
+
 
 ### PDF format
 
@@ -43,6 +69,8 @@ statements. Entries marked ○ are best-effort additions — see [Caveats](#cave
 |---|---|---|---|
 | Transfer to | Outgoing transfer to person/account | XFER | ★ |
 | Transfer from | Incoming transfer from person/account | XFER | ★ |
+| SWIFT Transfer to | Outgoing SWIFT / international transfer | XFER | ★ |
+| SWIFT Transfer from | Incoming SWIFT / international transfer | XFER | ○ |
 | Payment from | Incoming payment (SEPA credit transfer) | DEP | ★ |
 | Net Interest Paid | Daily interest on savings/deposit | INT | ★ |
 | Withheld Tax Refund | Tax refund on interest | INT | ★ |
@@ -150,10 +178,11 @@ You do not need to share any amounts, payee names, IBANs, or other personal
 information. Enable debug logging (`ofxstatement -d convert …`) to extract
 the type safely.
 
-**Multi-currency transactions.** The PDF parser only extracts EUR amounts.
-Non-EUR secondary amounts (e.g. a GBP amount on a currency exchange) are
-logged at debug level and skipped. The primary EUR amount and balance are
-always preserved.
+**Secondary-currency amounts are filtered.** Revolut statements often
+include both the account's primary currency and a conversion amount in a
+second currency (e.g. `€50.00` shown alongside `$52.10` for a currency
+exchange). The parser keeps only the primary currency; secondary amounts
+are logged at debug level and skipped.
 
 
 ## Installation
