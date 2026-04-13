@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-04-13
+
+### Fixed
+- PDF column-threshold calibration is now robust to sub-point x0 jitter
+  between the header row and body rows (e.g. `Description` header at
+  x0=124.7600 vs description words at x0=124.7598). The threshold is
+  placed at the midpoint between the `Date` and `Description` header
+  x0 positions instead of at `Description`'s exact x0. Previously this
+  caused whole transactions to be silently dropped — diagnosed on a
+  65-page EUR statement whose running balance was off by -1,300.00 due
+  to 8 dropped transactions on one page.
+- Revolut's `Reverted` sub-table (appended after the main transaction
+  table with a different layout and no `Balance` column) is now
+  recognised and excluded. Previously its rows were parsed as normal
+  transactions, which left the last real row's `end_balance` as `None`
+  on statements that had reverted entries (observed on TRY).
+
+### Changed
+- Refactored the month-name lookup from a flat 165-entry table into a
+  2D `Dict[lang_code, Tuple[12 aliases]]` structure, mirroring the
+  layout used by ofxstatement-consorsbank. Build-time assertions verify
+  every language row has 12 months and flag cross-language collisions.
+
 ## [0.2.0] - 2026-04-12
 
 ### Added
@@ -113,6 +136,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 16 tests using synthetic PDF / CSV fixtures (no real-statement dependency).
 - GPLv3 license headers on all source files.
 
-[Unreleased]: https://github.com/eduralph/ofxstatement-revolut/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/eduralph/ofxstatement-revolut/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/eduralph/ofxstatement-revolut/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/eduralph/ofxstatement-revolut/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/eduralph/ofxstatement-revolut/releases/tag/v0.1.0
