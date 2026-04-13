@@ -668,7 +668,9 @@ class TestPDFParser:
 
             # Calibrated thresholds must have shifted well past the defaults
             # (a +40mm shift is ~113pt; defaults are 120/300/400/500).
-            assert parser._desc_x > 200
+            # desc_x is the midpoint between Date (~156pt) and Description
+            # (~238pt), so ~197pt — well above the 120pt default.
+            assert parser._desc_x > 150
             assert parser._money_out_x > 320
             assert parser._money_in_x > 450
             assert parser._balance_x > 550
@@ -740,6 +742,76 @@ class TestPDFParser:
         finally:
             os.unlink(path)
 
+    def test_reverted_subtable_is_excluded(self) -> None:
+        """A trailing "Reverted from … to …" sub-table must not contribute.
+
+        Revolut appends a sub-table of reverted (charged-then-reversed)
+        transactions at the end of some PDFs. The sub-table uses a 4-column
+        "Start date | Description | Money out | Money in" header (no
+        Balance) and the listed transactions have no running balance.
+        Including them would double-count a charge that was already undone
+        AND produce a None end_balance (because the last listed transaction
+        has no balance).
+        """
+        pdf = FPDF()
+        pdf.add_font("dejavu", "", _FONT_PATH)
+        pdf.add_page()
+        y = 15.0
+        pdf.set_font("dejavu", size=16)
+        pdf.text(140, y, "TRY Statement")
+        y += 8
+        pdf.set_font("dejavu", size=10)
+        pdf.text(10, y, "IBAN DE89370400440532013000")
+        y += 10
+
+        pdf.set_font("dejavu", size=12)
+        pdf.text(
+            10, y, "Account transactions from December 1, 2025 to December 31, 2025"
+        )
+        y += 8
+
+        pdf.set_font("dejavu", size=10)
+        pdf.text(_X_DATE, y, "Date")
+        pdf.text(_X_DESC, y, "Description")
+        pdf.text(_X_MONEY_OUT, y, "Money out")
+        pdf.text(_X_MONEY_IN, y, "Money in")
+        pdf.text(_X_BALANCE, y, "Balance")
+        y += 6
+        pdf.text(_X_DATE, y, "Dec 1, 2025")
+        pdf.text(_X_DESC, y, "Real transaction")
+        pdf.text(_X_MONEY_OUT, y, "100.00 TRY")
+        pdf.text(_X_BALANCE, y, "900.00")
+        y += 10
+
+        # Reverted sub-table: different header (no Balance), no balances
+        # on its rows. Must not be captured.
+        pdf.set_font("dejavu", size=12)
+        pdf.text(10, y, "Reverted from December 1, 2025 to December 31, 2025")
+        y += 8
+        pdf.set_font("dejavu", size=10)
+        pdf.text(_X_DATE, y, "Start date")
+        pdf.text(_X_DESC, y, "Description")
+        pdf.text(_X_MONEY_OUT, y, "Money out")
+        pdf.text(_X_MONEY_IN, y, "Money in")
+        y += 6
+        pdf.text(_X_DATE, y, "Dec 15, 2025")
+        pdf.text(_X_DESC, y, "Reverted transaction")
+        pdf.text(_X_MONEY_OUT, y, "9,999.99 TRY")
+        y += 10
+        pdf.text(10, y, "Report lost or stolen card")
+
+        fd, path = tempfile.mkstemp(suffix=".pdf")
+        os.close(fd)
+        pdf.output(path)
+        try:
+            stmt = RevolutPlugin(UI(), {}).get_parser(path).parse()
+            assert len(stmt.lines) == 1
+            assert stmt.lines[0].memo is not None
+            assert stmt.lines[0].memo.startswith("Real transaction")
+            assert stmt.end_balance == Decimal("900.00")
+        finally:
+            os.unlink(path)
+
     def test_unrecognised_pdf_raises_format_error(self) -> None:
         """A PDF with no section headers and no table must fail loudly."""
         pdf = FPDF()
@@ -786,6 +858,34 @@ class TestPDFParser:
             parser._balance_x,
         )
         assert before == after
+
+    def test_calibration_tolerates_description_x0_jitter(self) -> None:
+        """Description words whose x0 drifts ~0.0002 below the header must
+        still classify as description, not date.
+
+        Regression: real Revolut PDFs render "Description" at x0=124.7600 on
+        the header row but rows below at x0=124.7598. With the desc_x
+        threshold set exactly at the header's x0 and an exclusive `<`
+        comparison, jittered rows fell into the date bucket and were
+        silently dropped — producing statements that failed the
+        start + sum == end validation.
+        """
+        plugin = RevolutPlugin(UI(), {})
+        parser = plugin.get_parser("ignored.pdf")
+        assert isinstance(parser, RevolutPDFParser)
+        header = [
+            {"text": "Date", "x0": 42.67},
+            {"text": "Description", "x0": 124.76},
+            {"text": "Money out", "x0": 335.06},
+            {"text": "Money in", "x0": 417.11},
+            {"text": "Balance", "x0": 526.28},
+        ]
+        parser._calibrate_from_header(header)
+        # A description word whose rendered x0 drifts below the header's x0
+        # must still be considered in the description column.
+        assert 124.7598 >= parser._desc_x
+        # And a date word (x0 ~ 42.67) must still be in the date column.
+        assert 42.67 < parser._desc_x
 
     # ── Multi-language resilience ──────────────────────────────────────────
 
