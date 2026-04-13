@@ -41,182 +41,154 @@ _DEFAULT_BALANCE_X = 500.0
 #
 # strptime's %b/%B are locale-sensitive and fail silently on non-English month
 # names (a German "15. Januar 2025" wouldn't parse in a C-locale process).
-# This lookup table is explicit and locale-independent. Keys are lowercased
-# month names or abbreviations in every language Revolut is known to localize
-# into; values are the month number (1–12). Add new languages here as needed.
-_MONTH_NAME_TABLE: Tuple[Tuple[str, int], ...] = (
-    # English
-    ("jan", 1),
-    ("january", 1),
-    ("feb", 2),
-    ("february", 2),
-    ("mar", 3),
-    ("march", 3),
-    ("apr", 4),
-    ("april", 4),
-    ("may", 5),
-    ("jun", 6),
-    ("june", 6),
-    ("jul", 7),
-    ("july", 7),
-    ("aug", 8),
-    ("august", 8),
-    ("sep", 9),
-    ("sept", 9),
-    ("september", 9),
-    ("oct", 10),
-    ("october", 10),
-    ("nov", 11),
-    ("november", 11),
-    ("dec", 12),
-    ("december", 12),
-    # German
-    ("januar", 1),
-    ("jän", 1),
-    ("jänner", 1),
-    ("februar", 2),
-    ("mär", 3),
-    ("märz", 3),
-    ("mai", 5),
-    ("juni", 6),
-    ("juli", 7),
-    ("okt", 10),
-    ("oktober", 10),
-    ("dez", 12),
-    ("dezember", 12),
-    # French
-    ("janv", 1),
-    ("janvier", 1),
-    ("févr", 2),
-    ("fevr", 2),
-    ("février", 2),
-    ("fevrier", 2),
-    ("mars", 3),
-    ("avr", 4),
-    ("avril", 4),
-    ("juin", 6),
-    ("juil", 7),
-    ("juillet", 7),
-    ("août", 8),
-    ("aout", 8),
-    ("septembre", 9),
-    ("octobre", 10),
-    ("novembre", 11),
-    ("déc", 12),
-    ("décembre", 12),
-    ("decembre", 12),
-    # Spanish
-    ("ene", 1),
-    ("enero", 1),
-    ("febrero", 2),
-    ("marzo", 3),
-    ("abr", 4),
-    ("abril", 4),
-    ("mayo", 5),
-    ("junio", 6),
-    ("julio", 7),
-    ("ago", 8),
-    ("agosto", 8),
-    ("septiembre", 9),
-    ("octubre", 10),
-    ("noviembre", 11),
-    ("dic", 12),
-    ("diciembre", 12),
-    # Italian
-    ("gen", 1),
-    ("gennaio", 1),
-    ("febbraio", 2),
-    ("aprile", 4),
-    ("mag", 5),
-    ("maggio", 5),
-    ("giu", 6),
-    ("giugno", 6),
-    ("lug", 7),
-    ("luglio", 7),
-    ("set", 9),
-    ("sett", 9),
-    ("settembre", 9),
-    ("ott", 10),
-    ("ottobre", 10),
-    ("dicembre", 12),
-    # Portuguese
-    ("janeiro", 1),
-    ("fev", 2),
-    ("fevereiro", 2),
-    ("março", 3),
-    ("marco", 3),
-    ("maio", 5),
-    ("junho", 6),
-    ("julho", 7),
-    ("set", 9),
-    ("setembro", 9),
-    ("out", 10),
-    ("outubro", 10),
-    ("novembro", 11),
-    ("dez", 12),
-    ("dezembro", 12),
-    # Dutch
-    ("januari", 1),
-    ("februari", 2),
-    ("mrt", 3),
-    ("maart", 3),
-    ("mei", 5),
-    ("juni", 6),
-    ("juli", 7),
-    ("augustus", 8),
-    ("okt", 10),
-    # Polish (nominative + genitive — Polish dates use genitive: "15 stycznia")
-    ("sty", 1),
-    ("styczeń", 1),
-    ("styczen", 1),
-    ("stycznia", 1),
-    ("lut", 2),
-    ("luty", 2),
-    ("lutego", 2),
-    ("marzec", 3),
-    ("marca", 3),
-    ("kwi", 4),
-    ("kwiecień", 4),
-    ("kwiecien", 4),
-    ("kwietnia", 4),
-    ("maj", 5),
-    ("maja", 5),
-    ("cze", 6),
-    ("czerwiec", 6),
-    ("czerwca", 6),
-    ("lip", 7),
-    ("lipiec", 7),
-    ("lipca", 7),
-    ("sie", 8),
-    ("sierpień", 8),
-    ("sierpien", 8),
-    ("sierpnia", 8),
-    ("wrz", 9),
-    ("wrzesień", 9),
-    ("wrzesien", 9),
-    ("września", 9),
-    ("wrzesnia", 9),
-    ("paź", 10),
-    ("paz", 10),
-    ("październik", 10),
-    ("pazdziernik", 10),
-    ("października", 10),
-    ("pazdziernika", 10),
-    ("lis", 11),
-    ("listopad", 11),
-    ("listopada", 11),
-    ("gru", 12),
-    ("grudzień", 12),
-    ("grudzien", 12),
-    ("grudnia", 12),
-)
+# Explicit, locale-independent lookup instead.
+#
+# Two-dimensional table: one row per language, 12 columns per row (one per
+# month, Jan..Dec). Each cell is a tuple of aliases — full name, common
+# abbreviation(s), and inflected forms (e.g. Polish genitive "stycznia" used
+# in dates like "15 stycznia"). Add a new language by appending a row.
+#
+# Cross-language collisions are fine as long as both sides map to the same
+# month (validated at module load) — e.g. "mai" → 5 in DE, NL, and FR.
+_MONTHS_BY_LANGUAGE: Dict[str, Tuple[Tuple[str, ...], ...]] = {
+    # ISO 639-1 code → 12 cells, one per month.
+    "en": (
+        ("jan", "january"),
+        ("feb", "february"),
+        ("mar", "march"),
+        ("apr", "april"),
+        ("may",),
+        ("jun", "june"),
+        ("jul", "july"),
+        ("aug", "august"),
+        ("sep", "sept", "september"),
+        ("oct", "october"),
+        ("nov", "november"),
+        ("dec", "december"),
+    ),
+    "de": (
+        ("januar", "jän", "jänner"),
+        ("februar",),
+        ("mär", "märz"),
+        ("april",),
+        ("mai",),
+        ("juni",),
+        ("juli",),
+        ("august",),
+        ("september",),
+        ("okt", "oktober"),
+        ("november",),
+        ("dez", "dezember"),
+    ),
+    "fr": (
+        ("janv", "janvier"),
+        ("févr", "fevr", "février", "fevrier"),
+        ("mars",),
+        ("avr", "avril"),
+        ("mai",),
+        ("juin",),
+        ("juil", "juillet"),
+        ("août", "aout"),
+        ("septembre",),
+        ("octobre",),
+        ("novembre",),
+        ("déc", "décembre", "decembre"),
+    ),
+    "es": (
+        ("ene", "enero"),
+        ("febrero",),
+        ("marzo",),
+        ("abr", "abril"),
+        ("mayo",),
+        ("junio",),
+        ("julio",),
+        ("ago", "agosto"),
+        ("septiembre",),
+        ("octubre",),
+        ("noviembre",),
+        ("dic", "diciembre"),
+    ),
+    "it": (
+        ("gen", "gennaio"),
+        ("febbraio",),
+        ("marzo",),
+        ("aprile",),
+        ("mag", "maggio"),
+        ("giu", "giugno"),
+        ("lug", "luglio"),
+        ("agosto",),
+        ("set", "sett", "settembre"),
+        ("ott", "ottobre"),
+        ("novembre",),
+        ("dicembre",),
+    ),
+    "pt": (
+        ("janeiro",),
+        ("fev", "fevereiro"),
+        ("março", "marco"),
+        ("abril",),
+        ("maio",),
+        ("junho",),
+        ("julho",),
+        ("agosto",),
+        ("set", "setembro"),
+        ("out", "outubro"),
+        ("novembro",),
+        ("dez", "dezembro"),
+    ),
+    "nl": (
+        ("januari",),
+        ("februari",),
+        ("mrt", "maart"),
+        ("april",),
+        ("mei",),
+        ("juni",),
+        ("juli",),
+        ("augustus",),
+        ("september",),
+        ("okt",),
+        ("november",),
+        ("december",),
+    ),
+    # Polish dates use the genitive case: "15 stycznia 2025" (not "styczeń").
+    # Both nominative and genitive forms listed so either parses.
+    "pl": (
+        ("sty", "styczeń", "styczen", "stycznia"),
+        ("lut", "luty", "lutego"),
+        ("marzec", "marca"),
+        ("kwi", "kwiecień", "kwiecien", "kwietnia"),
+        ("maj", "maja"),
+        ("cze", "czerwiec", "czerwca"),
+        ("lip", "lipiec", "lipca"),
+        ("sie", "sierpień", "sierpien", "sierpnia"),
+        ("wrz", "wrzesień", "wrzesien", "września", "wrzesnia"),
+        (
+            "paź",
+            "paz",
+            "październik",
+            "pazdziernik",
+            "października",
+            "pazdziernika",
+        ),
+        ("lis", "listopad", "listopada"),
+        ("gru", "grudzień", "grudzien", "grudnia"),
+    ),
+}
 
-# Built from _MONTH_NAME_TABLE. Collisions across languages are allowed as
-# long as they map to the same number (checked at module load time).
+# Flattened lookup: alias → month number (1..12). Collisions across languages
+# are allowed as long as they map to the same month (checked at load time).
 _MONTH_NAMES: Dict[str, int] = {}
-for _name, _num in _MONTH_NAME_TABLE:
-    if _MONTH_NAMES.setdefault(_name, _num) != _num:
-        raise AssertionError(f"Month name collision: {_name!r}")
+for _lang, _months in _MONTHS_BY_LANGUAGE.items():
+    assert len(_months) == 12, f"{_lang!r} row must have 12 months"
+    for _idx, _aliases in enumerate(_months):
+        _num = _idx + 1
+        for _alias in _aliases:
+            _key = _alias.casefold()
+            if _MONTH_NAMES.setdefault(_key, _num) != _num:
+                raise AssertionError(
+                    f"Month name collision: {_alias!r} maps to both "
+                    f"{_MONTH_NAMES[_key]} and {_num} (seen in {_lang!r})"
+                )
 
 
 # ── Regex patterns ───────────────────────────────────────────────────────────
@@ -369,6 +341,15 @@ _CURRENCY_RE = re.compile(
 )
 _SORT_CODE_RE = re.compile(r"Sort Code\s+(\d{6})")
 _ACCOUNT_NUMBER_RE = re.compile(r"Account Number\s+(\d{6,})")
+
+# End-of-table marker for the "Reverted" sub-section that Revolut appends
+# at the end of some statements. It lists transactions that were charged
+# and then reversed (net impact zero), uses a 4-column `Start date |
+# Description | Money out | Money in` header (no Balance), and must NOT
+# be treated as part of the regular transaction table.
+#
+# English-only: add localizations when real non-English samples appear.
+_REVERTED_RE = re.compile(r"^Reverted\b", re.IGNORECASE)
 
 # ── Column header aliases ────────────────────────────────────────────────────
 #
@@ -885,6 +866,18 @@ class RevolutPDFParser(AbstractStatementParser):
                         w["text"] for w in sorted(line_words, key=lambda w: w["x0"])
                     )
 
+                    # Check for "Reverted" sub-table — these transactions
+                    # were charged and then reversed (net zero) and must
+                    # not be included in the statement. Close any pending
+                    # transaction and stop capturing until the next proper
+                    # section header or balanced table header appears.
+                    if _REVERTED_RE.match(line_text.strip()):
+                        if current_txn:
+                            transactions.append(current_txn)
+                            current_txn = None
+                        in_table = False
+                        continue
+
                     # Check for section header
                     m = _SECTION_RE.match(line_text.strip())
                     if m:
@@ -1001,18 +994,23 @@ class RevolutPDFParser(AbstractStatementParser):
 
         Amount columns are right-aligned, so a number's x0 can be *less* than
         its header word's x0. To keep all numbers in the right bucket we use
-        the midpoint between adjacent header x0's as each threshold (except
-        for the Description threshold, where both neighbours are left-aligned
-        and the header x0 itself works).
+        the midpoint between adjacent header x0's as each threshold. The
+        description threshold uses the midpoint between Date and Description
+        for the same reason applied to left-aligned columns: description
+        words share the Description column's x0 to within PDF rendering
+        jitter, so a threshold set exactly at that x0 will misclassify any
+        description word whose rasterised x0 drifts even 0.001 below it.
 
         Falls back to keeping existing thresholds if the header words can't be
         resolved or if the resulting thresholds aren't strictly increasing
         (which would indicate we mis-identified one of the columns).
         """
+        date_x: Optional[float] = None
         desc_x: Optional[float] = None
         balance_x: Optional[float] = None
         money_positions: List[float] = []
 
+        date_first = _HEADER_FIRST_TOKENS["date"]
         desc_first = _HEADER_FIRST_TOKENS["description"]
         balance_first = _HEADER_FIRST_TOKENS["balance"]
         money_first = (
@@ -1026,7 +1024,9 @@ class RevolutPDFParser(AbstractStatementParser):
             # aliases calibrate identically.
             first = w["text"].strip().split(" ", 1)[0].casefold()
             x0 = w["x0"]
-            if desc_x is None and first in desc_first:
+            if date_x is None and first in date_first:
+                date_x = x0
+            elif desc_x is None and first in desc_first:
                 desc_x = x0
             elif first in money_first:
                 money_positions.append(x0)
@@ -1035,8 +1035,9 @@ class RevolutPDFParser(AbstractStatementParser):
 
         if desc_x is None or len(money_positions) < 2 or balance_x is None:
             logger.debug(
-                "Header row incomplete (desc=%s, money=%s, balance=%s) — "
-                "keeping existing thresholds",
+                "Header row incomplete (date=%s, desc=%s, money=%s, balance=%s) "
+                "— keeping existing thresholds",
+                date_x,
                 desc_x,
                 money_positions,
                 balance_x,
@@ -1044,7 +1045,10 @@ class RevolutPDFParser(AbstractStatementParser):
             return
 
         money_out_x, money_in_x = money_positions[0], money_positions[1]
-        new_desc_x = desc_x
+        # If Date was matched, use the midpoint. Otherwise fall back to the
+        # Description x0 itself — still wrong at sub-point precision, but the
+        # best we can do without both endpoints.
+        new_desc_x = (date_x + desc_x) / 2 if date_x is not None else desc_x
         new_money_out_x = (desc_x + money_out_x) / 2
         new_money_in_x = (money_out_x + money_in_x) / 2
         new_balance_x = (money_in_x + balance_x) / 2
