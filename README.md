@@ -264,7 +264,7 @@ ofxstatement -d convert -t revolut statement.pdf statement.ofx
 
 ```
 python -m venv .venv
-.venv/bin/pip install -e ".[test]"
+.venv/bin/pip install -e ".[dev]"
 .venv/bin/pytest tests/
 ```
 
