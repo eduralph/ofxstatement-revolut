@@ -30,6 +30,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
   "pytest",
+  "pytest-cov",
   "fpdf2",
 ]
 
@@ -38,3 +39,11 @@ Homepage = "https://github.com/kedder/ofxstatement-revolut/"
 
 [project.entry-points."ofxstatement"]
 revolut = "ofxstatement_revolut.plugin:RevolutPlugin"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = [
+    "--cov=ofxstatement_revolut",
+    "--cov-report=term-missing",
+    "--no-cov-on-fail",
+]
