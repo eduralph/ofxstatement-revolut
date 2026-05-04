@@ -6,6 +6,7 @@ from typing import List, Optional, Tuple
 
 import pytest
 from fpdf import FPDF
+from ofxstatement.exceptions import ParseError
 from ofxstatement.ui import UI
 
 from ofxstatement_revolut.csv_parser import (
@@ -1339,9 +1340,8 @@ class TestCSVParser:
         finally:
             os.unlink(path)
 
-    def test_csv_filters_mixed_currency_rows(self) -> None:
-        """Dominant-currency detection must drop stray rows in other currencies."""
-        path = _make_csv(
+    def _mixed_currency_csv(self) -> str:
+        return _make_csv(
             [
                 (
                     "Card Payment",
@@ -1381,11 +1381,45 @@ class TestCSVParser:
                 ),
             ]
         )
+
+    def test_csv_multi_currency_without_filter_raises(self) -> None:
+        """Mixed-currency CSV with no `currency` setting must error loudly."""
+        path = self._mixed_currency_csv()
         try:
-            stmt = RevolutPlugin(UI(), {}).get_parser(path).parse()
-            assert stmt.currency == "EUR"
-            assert len(stmt.lines) == 2
-            assert all(sl.memo in ("A", "B") for sl in stmt.lines)
+            with pytest.raises(ParseError) as exc_info:
+                RevolutPlugin(UI(), {}).get_parser(path).parse()
+            msg = str(exc_info.value)
+            assert "multiple currencies" in msg
+            assert "EUR=2" in msg
+            assert "USD=1" in msg
+            assert "currency" in msg.lower()
+        finally:
+            os.unlink(path)
+
+    def test_csv_filter_keeps_only_target_currency(self) -> None:
+        """`currency` setting acts as an explicit filter on mixed-currency files."""
+        path = self._mixed_currency_csv()
+        try:
+            stmt = RevolutPlugin(UI(), {"currency": "USD"}).get_parser(path).parse()
+            assert stmt.currency == "USD"
+            assert len(stmt.lines) == 1
+            assert stmt.lines[0].memo == "Exchanged to USD"
+        finally:
+            os.unlink(path)
+
+    def test_csv_filter_currency_not_in_file_warns(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """A configured currency absent from the file produces a warning, not an error."""
+        path = self._mixed_currency_csv()
+        try:
+            with caplog.at_level("WARNING", logger="ofxstatement_revolut.csv_parser"):
+                stmt = RevolutPlugin(UI(), {"currency": "GBP"}).get_parser(path).parse()
+            assert len(stmt.lines) == 0
+            assert any(
+                "currency=GBP is not present" in record.getMessage()
+                for record in caplog.records
+            ), [r.getMessage() for r in caplog.records]
         finally:
             os.unlink(path)
 

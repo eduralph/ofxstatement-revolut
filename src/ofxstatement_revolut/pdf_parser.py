@@ -705,12 +705,16 @@ class RevolutPDFParser(AbstractStatementParser):
         self,
         filename: str,
         account: str = "Current",
-        currency: str = "EUR",
+        currency: Optional[str] = None,
         account_id: str = "",
     ):
         self.filename = filename
         self.account_filter = account
-        self.currency = currency
+        # PDFs are single-currency by design (Revolut emits one PDF per
+        # currency account). _extract_header_info overrides this from the
+        # "<CUR> Statement" page heading; "EUR" is just the fallback if
+        # neither config nor heading provides a value.
+        self.currency = currency or "EUR"
         self.account_id = account_id
         # Column x-thresholds — recalibrated when the header row is parsed.
         self._desc_x = _DEFAULT_DESC_X

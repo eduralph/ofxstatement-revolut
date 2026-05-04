@@ -21,6 +21,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Dict, List, Optional, Set, Tuple
 
+from ofxstatement.exceptions import ParseError
 from ofxstatement.parser import AbstractStatementParser
 from ofxstatement.statement import Statement, StatementLine
 
@@ -305,12 +306,16 @@ class RevolutCSVParser(AbstractStatementParser):
         self,
         filename: str,
         account: str = "Current",
-        currency: str = "EUR",
+        currency: Optional[str] = None,
         account_id: str = "",
     ):
         self.filename = filename
         self.account_filter = account
-        self.currency = currency
+        # `None` means "auto-detect from the CSV's Currency column".
+        # When set, it acts as an explicit filter — rows in other
+        # currencies are dropped (with a warning if the chosen currency
+        # isn't present in the file at all).
+        self.currency: Optional[str] = currency
         self.account_id = account_id
         self._first_balance: Optional[Decimal] = None
         self._last_balance: Optional[Decimal] = None
@@ -337,9 +342,7 @@ class RevolutCSVParser(AbstractStatementParser):
             data_rows = list(reader)
 
         max_index = max(cols.values())
-        detected_currency = self._detect_currency(data_rows, cols, max_index)
-        if detected_currency:
-            self.currency = detected_currency
+        self._resolve_currency(data_rows, cols, max_index)
 
         skipped_product = 0
         skipped_state = 0
@@ -459,24 +462,34 @@ class RevolutCSVParser(AbstractStatementParser):
     def _matches_account(self, product: str) -> bool:
         return product.lower() == self.account_filter.lower()
 
-    def _detect_currency(
+    def _resolve_currency(
         self,
         rows: List[List[str]],
         cols: Dict[str, int],
         max_index: int,
-    ) -> Optional[str]:
-        """Return the dominant currency in rows matching the account filter.
+    ) -> None:
+        """Decide ``self.currency`` from config + CSV contents.
 
-        Revolut exports one CSV per currency account, so the expected case is
-        a single currency throughout. If multiple are present we pick the most
-        frequent one and let the row-level currency filter drop the rest.
-        Returns None if the CSV has no Currency column.
+        Three cases, in order:
+
+        - Config supplied a currency → keep it as the explicit filter.
+          Warn (don't error) if the chosen currency isn't represented in
+          the file; an empty OFX is its own signal.
+        - Config didn't, and the CSV has exactly one currency → adopt it.
+        - Config didn't, and the CSV has more than one → raise
+          ``ParseError`` with a per-currency line-count breakdown rather
+          than silently picking one and dropping the rest.
+
+        The "no Currency column at all" case (older Revolut exports)
+        leaves ``self.currency`` untouched — caller will keep whatever
+        the config supplied, or stay None and emit no rows. Loud
+        warnings around the empty-output case are handled in ``parse()``.
         """
         cur_idx = cols.get("currency")
         if cur_idx is None:
-            return None
+            return
 
-        counts: Dict[str, int] = {}
+        counts: Counter = Counter()
         for row in rows:
             if len(row) <= max_index:
                 continue
@@ -486,20 +499,41 @@ class RevolutCSVParser(AbstractStatementParser):
                 continue
             cur = row[cur_idx].strip()
             if cur:
-                counts[cur] = counts.get(cur, 0) + 1
+                counts[cur] += 1
+
+        if self.currency:
+            if counts and self.currency not in counts:
+                logger.warning(
+                    "currency=%s is not present in this CSV (currencies "
+                    "found: %s). The output OFX will be empty.",
+                    self.currency,
+                    self._format_currency_counts(counts),
+                )
+            return
 
         if not counts:
-            return None
-        dominant = max(counts, key=lambda c: counts[c])
-        if len(counts) > 1:
-            logger.warning(
-                "CSV contains multiple currencies %s — using %s; set "
-                "`currency` in config to override.",
-                dict(counts),
-                dominant,
-            )
-        logger.debug("Detected currency %s from CSV", dominant)
-        return dominant
+            return
+
+        if len(counts) == 1:
+            self.currency = next(iter(counts))
+            logger.debug("Detected currency %s from CSV", self.currency)
+            return
+
+        raise ParseError(
+            0,
+            "Revolut CSV contains multiple currencies "
+            f"({self._format_currency_counts(counts)}). "
+            "Revolut typically exports one CSV per currency account, so a "
+            "mixed-currency file is unusual; set `currency` in config.ini "
+            "to pick one and rerun the converter once per currency you "
+            "want to export.",
+        )
+
+    @staticmethod
+    def _format_currency_counts(counts: "Counter[str]") -> str:
+        return ", ".join(
+            f"{ccy}={n}" for ccy, n in sorted(counts.items(), key=lambda kv: -kv[1])
+        )
 
     def _parse_row(
         self,
