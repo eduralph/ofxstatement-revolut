@@ -108,18 +108,27 @@ following columns:
 |---|---|
 | Type | Transaction type keyword |
 | Product | Account type (`Current`, `Deposit`) |
-| Started Date | Initiated timestamp (`YYYY-MM-DD HH:MM:SS`) |
-| Completed Date | Completed timestamp — used as the transaction date |
-| Description | Free-text description |
+| Started Date | Initiated timestamp (`YYYY-MM-DD HH:MM:SS`) — preserved as OFX `<DTUSER>` |
+| Completed Date | Completed timestamp — used as the transaction date (OFX `<DTPOSTED>`) |
+| Description | Free-text description — routed to OFX `<NAME>` (payee) |
 | Amount | Transaction amount (positive or negative) |
-| Fee | Fee amount (subtracted from the transaction amount) |
+| Fee | Fee amount — emitted as a separate `<TRNTYPE>FEE</TRNTYPE>` transaction |
 | Currency | Currency code (e.g. `EUR`) |
 | State | Transaction state (only `COMPLETED` is imported) |
 | Balance | Running balance after the transaction |
 
-Fees are subtracted from the transaction amount automatically. Only rows
-with `State = COMPLETED` are imported; pending and reverted transactions
-are skipped.
+When a row has both a non-zero amount and a non-zero fee, the parser
+emits two transactions: the parent (amount as recorded by Revolut) and
+a separate `FEE` transaction with payee `Revolut`, memo `Fee for
+<description>`, and amount `-fee`. The pair sums to the same net delta
+Revolut applied to the running balance, so balances stay consistent;
+downstream tools (GnuCash, HomeBank) get a distinct fee posting they
+can categorise on its own. Pure-fee rows (amount column 0, fee
+non-zero — e.g. a standalone "Premium plan fee" charge) collapse to a
+single `FEE` line carrying the fee value.
+
+Only rows with `State = COMPLETED` are imported; pending and reverted
+transactions are skipped.
 
 
 ### Transaction types (CSV)
