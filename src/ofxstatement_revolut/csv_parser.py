@@ -318,6 +318,7 @@ class RevolutCSVParser(AbstractStatementParser):
         self.currency: Optional[str] = currency
         self.account_id = account_id
         self._first_balance: Optional[Decimal] = None
+        self._first_row_net_delta: Optional[Decimal] = None
         self._last_balance: Optional[Decimal] = None
 
     def parse(self) -> Statement:
@@ -401,9 +402,9 @@ class RevolutCSVParser(AbstractStatementParser):
                 skipped_currency += 1
                 continue
 
-            sl = self._parse_row(row, row_num, cols)
-            if sl:
-                statement.lines.append(sl)
+            row_lines = self._parse_row(row, row_num, cols)
+            if row_lines:
+                statement.lines.extend(row_lines)
             else:
                 skipped_parse += 1
 
@@ -425,11 +426,19 @@ class RevolutCSVParser(AbstractStatementParser):
         if statement.lines:
             statement.start_date = statement.lines[0].date
             statement.end_date = statement.lines[-1].date
-            first_sl = statement.lines[0]
             if self._last_balance is not None:
                 statement.end_balance = self._last_balance
-            if self._first_balance is not None and first_sl.amount is not None:
-                statement.start_balance = self._first_balance - first_sl.amount
+            # Back out the first row's *net* delta — Revolut's Balance
+            # column reflects amount minus fee, so for rows with a fee
+            # split into parent + fee lines we still need the combined
+            # delta (not just lines[0].amount, which is the parent only).
+            if (
+                self._first_balance is not None
+                and self._first_row_net_delta is not None
+            ):
+                statement.start_balance = (
+                    self._first_balance - self._first_row_net_delta
+                )
             logger.info(
                 "Statement: %s to %s, %d lines, start_balance=%s, end_balance=%s",
                 (
@@ -540,40 +549,48 @@ class RevolutCSVParser(AbstractStatementParser):
         row: List[str],
         row_num: int,
         cols: Dict[str, int],
-    ) -> Optional[StatementLine]:
-        sl = StatementLine()
-
+    ) -> List[StatementLine]:
         # Use completed date as the transaction date
         date_str = row[cols["completed"]].strip()
         try:
-            sl.date = _parse_csv_date(date_str)
+            tx_date = _parse_csv_date(date_str)
         except ValueError:
             logger.warning(
                 "Row %d: cannot parse date %r, skipping",
                 row_num,
                 date_str,
             )
-            return None
+            return []
 
-        sl.memo = row[cols["description"]].strip()
+        # Started Date → date_user when present. OFX consumers (GnuCash etc.)
+        # then show the user-initiated timestamp alongside the bank-completed
+        # one, which matters for transactions that take a day or more to
+        # settle (international transfers, top-ups in transit).
+        date_user: Optional[datetime] = None
+        started_idx = cols.get("started")
+        if started_idx is not None:
+            started_str = row[started_idx].strip()
+            if started_str:
+                try:
+                    date_user = _parse_csv_date(started_str)
+                except ValueError:
+                    logger.debug(
+                        "Row %d: cannot parse started_date=%r, leaving date_user unset",
+                        row_num,
+                        started_str,
+                    )
+
+        # Description → payee. Revolut's Description column is the
+        # counterparty/merchant, which is what OFX <NAME> is for; routing it
+        # to memo would hide it from tools that show only the payee column.
+        description = row[cols["description"]].strip()
 
         amount_str = row[cols["amount"]].strip()
         fee_idx = cols.get("fee")
         fee_str = row[fee_idx].strip() if fee_idx is not None else ""
         try:
-            sl.amount = _parse_csv_amount(amount_str)
-            if fee_str:
-                fee = _parse_csv_amount(fee_str)
-                if fee:
-                    sl.amount -= fee
-                    logger.debug(
-                        "Row %d: amount=%s fee=%s → net=%s (%s)",
-                        row_num,
-                        amount_str,
-                        fee_str,
-                        sl.amount,
-                        sl.memo,
-                    )
+            csv_amount = _parse_csv_amount(amount_str)
+            fee = _parse_csv_amount(fee_str) if fee_str else Decimal("0")
         except Exception:
             logger.warning(
                 "Row %d: cannot parse amount=%r fee=%r, skipping",
@@ -581,41 +598,102 @@ class RevolutCSVParser(AbstractStatementParser):
                 amount_str,
                 fee_str,
             )
-            return None
+            return []
 
-        # Track balances for start/end extraction
+        net_delta = csv_amount - fee
+
+        # Track balances for start/end extraction. The first row's net
+        # delta (CSV amount minus fee) is what Revolut's Balance column
+        # reflects — used by parse() to back-derive start_balance.
         balance_idx = cols.get("balance")
         if balance_idx is not None:
             try:
                 balance = _parse_csv_amount(row[balance_idx].strip())
                 if self._first_balance is None:
                     self._first_balance = balance
+                    self._first_row_net_delta = net_delta
                 self._last_balance = balance
             except Exception:
                 pass
 
-        sl.id = _make_id(sl.date, sl.amount, sl.memo)
+        # Pure-fee row: amount column is 0 with a non-zero fee (e.g. a
+        # standalone "Premium plan fee" charge). Emit a single FEE line
+        # carrying the fee value — splitting into parent+fee would
+        # produce a useless amount=0 parent.
+        if csv_amount == 0 and fee:
+            sole = StatementLine()
+            sole.date = tx_date
+            sole.date_user = date_user
+            sole.payee = description
+            sole.amount = -fee
+            sole.trntype = "FEE"
+            sole.id = _make_id(sole.date, sole.amount, description)
+            return [sole]
 
-        # Determine transaction type
+        # Parent line — the transaction proper, fee NOT netted in.
+        parent = StatementLine()
+        parent.date = tx_date
+        parent.date_user = date_user
+        parent.payee = description
+        parent.amount = csv_amount
+        # Hash the *net* delta (csv_amount - fee) for ID stability across
+        # the migration: rows that previously had a fee netted into amount
+        # keep the same parent ID, so re-imports don't show duplicates.
+        parent.id = _make_id(parent.date, net_delta, description)
+        parent.trntype = self._classify_trntype(
+            row, cols, csv_amount, description, row_num
+        )
+
+        if not fee:
+            return [parent]
+
+        # Separate FEE line — gives downstream tools (GnuCash, HomeBank)
+        # a distinct posting they can categorise independently from the
+        # underlying transaction. Sum (parent.amount + fee_line.amount)
+        # equals the original net delta, so balances stay consistent.
+        fee_line = StatementLine()
+        fee_line.date = tx_date
+        fee_line.date_user = date_user
+        fee_line.payee = "Revolut"
+        fee_line.memo = f"Fee for {description}" if description else "Fee"
+        fee_line.amount = -fee
+        fee_line.trntype = "FEE"
+        # Suffix derives a stable, unique fee ID from the parent — sortable
+        # alongside the parent and impossible to collide across rows.
+        fee_line.id = parent.id + "-fee"
+        logger.debug(
+            "Row %d: split amount=%s fee=%s into parent + FEE line (%s)",
+            row_num,
+            amount_str,
+            fee_str,
+            description,
+        )
+        return [parent, fee_line]
+
+    def _classify_trntype(
+        self,
+        row: List[str],
+        cols: Dict[str, int],
+        amount: Decimal,
+        description: str,
+        row_num: int,
+    ) -> str:
         txn_type = row[cols["type"]].strip()
-        ttype = _match_csv_txn_type(txn_type, sl.memo)
+        ttype = _match_csv_txn_type(txn_type, description)
         if ttype:
-            sl.trntype = ttype
-        elif sl.amount > 0:
-            sl.trntype = "CREDIT"
+            return ttype
+        if amount > 0:
             logger.debug(
                 "Row %d: unknown CSV type %r for %r — falling back to CREDIT",
                 row_num,
                 txn_type,
-                sl.memo,
+                description,
             )
-        else:
-            sl.trntype = "DEBIT"
-            logger.debug(
-                "Row %d: unknown CSV type %r for %r — falling back to DEBIT",
-                row_num,
-                txn_type,
-                sl.memo,
-            )
-
-        return sl
+            return "CREDIT"
+        logger.debug(
+            "Row %d: unknown CSV type %r for %r — falling back to DEBIT",
+            row_num,
+            txn_type,
+            description,
+        )
+        return "DEBIT"

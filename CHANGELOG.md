@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-05-04
+
+### Changed
+- **CSV: fees emitted as separate `FEE` transactions** instead of being
+  netted into the parent transaction's amount. Each row with a non-zero
+  amount AND a non-zero fee now produces two OFX transactions: the
+  parent (amount as recorded by Revolut) plus a `FEE` line with payee
+  `Revolut`, memo `Fee for <description>`, and amount `-fee`.
+  Downstream tools (GnuCash, HomeBank) can now categorise fees on
+  their own. Sum of the two equals the original net delta, so balances
+  stay consistent. Pure-fee rows (amount=0 with a non-zero fee — e.g.
+  a standalone "Premium plan fee" charge) collapse to a single `FEE`
+  line. The parent's transaction ID is hashed against the *net* delta
+  for stability across the migration: rows that previously had a fee
+  netted into amount keep the same parent ID, so re-imports of past
+  statements don't show duplicates.
+- **CSV: Description routes to `<NAME>` (payee) instead of `<MEMO>`.**
+  Revolut's Description column is the counterparty/merchant, which is
+  what OFX `<NAME>` is for. Memo stays unset to avoid duplicating the
+  same string in tools that show both fields. Aligns with the
+  upstream [mlaitinen/ofxstatement-revolut][m] convention.
+- **CSV: Started Date preserved as `<DTUSER>` on every line.** OFX
+  consumers now show the user-initiated timestamp alongside the
+  bank-completed `<DTPOSTED>`, useful for transactions that take a
+  day or more to settle (international transfers, top-ups in
+  transit). Falls back gracefully when the column is absent or
+  unparseable.
+
+[m]: https://github.com/mlaitinen/ofxstatement-revolut
+
 ## [0.3.0] - 2026-05-04
 
 ### Changed

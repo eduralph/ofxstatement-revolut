@@ -1218,13 +1218,20 @@ class TestCSVParser:
             parser = plugin.get_parser(path)
             stmt = parser.parse()
 
-            assert len(stmt.lines) == 2
-            assert stmt.lines[0].memo == "Interest earned - Savings"
+            # Interest row (amount=0.05, fee=0.01) splits into a parent
+            # INT line + a FEE line; the To EUR Savings row stays as one.
+            assert len(stmt.lines) == 3
+            assert stmt.lines[0].payee == "Interest earned - Savings"
             assert stmt.lines[0].trntype == "INT"
+            assert stmt.lines[0].amount == Decimal("0.05")
+            assert stmt.lines[1].trntype == "FEE"
+            assert stmt.lines[1].payee == "Revolut"
+            assert stmt.lines[1].amount == Decimal("-0.01")
+            assert stmt.lines[2].payee == "To EUR Savings"
         finally:
             os.unlink(path)
 
-    def test_csv_fee_subtracted(self) -> None:
+    def test_csv_pure_fee_row_emits_single_fee_line(self) -> None:
         path = _make_csv(
             [
                 (
@@ -1249,8 +1256,94 @@ class TestCSVParser:
             assert len(stmt.lines) == 1
             assert stmt.lines[0].amount == Decimal("-7.99")
             assert stmt.lines[0].trntype == "FEE"
+            assert stmt.lines[0].payee == "Premium plan fee"
         finally:
             os.unlink(path)
+
+    def test_csv_fee_on_real_transaction_splits_into_parent_and_fee(self) -> None:
+        """A non-zero amount with a non-zero fee yields parent + FEE lines."""
+        path = _make_csv(
+            [
+                (
+                    "Transfer",
+                    "Current",
+                    "2025-02-15 12:00:00",
+                    "2025-02-15 12:00:00",
+                    "International transfer to Bob",
+                    "-50.00",
+                    "1.50",
+                    "EUR",
+                    "COMPLETED",
+                    "948.50",
+                ),
+            ]
+        )
+        try:
+            stmt = RevolutPlugin(UI(), {}).get_parser(path).parse()
+            assert len(stmt.lines) == 2
+            parent, fee_line = stmt.lines
+            # Parent carries the raw transaction amount, fee is separate
+            assert parent.amount == Decimal("-50.00")
+            assert parent.payee == "International transfer to Bob"
+            assert parent.trntype == "XFER"
+            assert fee_line.amount == Decimal("-1.50")
+            assert fee_line.payee == "Revolut"
+            assert fee_line.memo == "Fee for International transfer to Bob"
+            assert fee_line.trntype == "FEE"
+            # Fee ID derives deterministically from the parent
+            assert parent.id is not None
+            assert fee_line.id == parent.id + "-fee"
+            # Net effect on the account = -51.50, matches the Balance delta
+            assert parent.amount + fee_line.amount == Decimal("-51.50")
+            # start_balance back-derives from the first row's net delta
+            assert stmt.start_balance == Decimal("1000.00")
+            assert stmt.end_balance == Decimal("948.50")
+        finally:
+            os.unlink(path)
+
+    def test_csv_fee_split_preserves_parent_id_across_migration(self) -> None:
+        """Parent ID is hashed against net amount so re-imports don't dupe."""
+        # Two CSVs differing only in fee column — same row otherwise.
+        # The net delta is identical, so the parent ID must be identical.
+        no_fee_path = _make_csv(
+            [
+                (
+                    "Card Payment",
+                    "Current",
+                    "2025-03-01 10:00:00",
+                    "2025-03-01 10:00:00",
+                    "Merchant",
+                    "-10.50",  # Net amount, no separate fee
+                    "0.00",
+                    "EUR",
+                    "COMPLETED",
+                    "989.50",
+                ),
+            ]
+        )
+        with_fee_path = _make_csv(
+            [
+                (
+                    "Card Payment",
+                    "Current",
+                    "2025-03-01 10:00:00",
+                    "2025-03-01 10:00:00",
+                    "Merchant",
+                    "-10.00",  # Same net (-10.50) but split as -10.00 + 0.50 fee
+                    "0.50",
+                    "EUR",
+                    "COMPLETED",
+                    "989.50",
+                ),
+            ]
+        )
+        try:
+            stmt_a = RevolutPlugin(UI(), {}).get_parser(no_fee_path).parse()
+            stmt_b = RevolutPlugin(UI(), {}).get_parser(with_fee_path).parse()
+            assert stmt_a.lines[0].id == stmt_b.lines[0].id
+        finally:
+            os.unlink(no_fee_path)
+            os.unlink(with_fee_path)
 
     def test_csv_skips_non_completed(self) -> None:
         path = _make_csv(
@@ -1299,7 +1392,63 @@ class TestCSVParser:
             stmt = parser.parse()
 
             assert len(stmt.lines) == 1
-            assert stmt.lines[0].memo == "Completed one"
+            assert stmt.lines[0].payee == "Completed one"
+        finally:
+            os.unlink(path)
+
+    def test_csv_payee_set_from_description_memo_unset(self) -> None:
+        """Description routes to payee; memo stays None to avoid duplication."""
+        path = _make_csv(
+            [
+                (
+                    "Card Payment",
+                    "Current",
+                    "2025-03-01 10:00:00",
+                    "2025-03-01 10:00:00",
+                    "Some merchant",
+                    "-12.34",
+                    "0.00",
+                    "EUR",
+                    "COMPLETED",
+                    "100.00",
+                ),
+            ]
+        )
+        try:
+            stmt = RevolutPlugin(UI(), {}).get_parser(path).parse()
+            assert len(stmt.lines) == 1
+            assert stmt.lines[0].payee == "Some merchant"
+            assert stmt.lines[0].memo is None
+        finally:
+            os.unlink(path)
+
+    def test_csv_date_user_populated_from_started_date(self) -> None:
+        """Started Date is preserved as date_user; Completed Date stays as date."""
+        path = _make_csv(
+            [
+                (
+                    "Transfer",
+                    "Current",
+                    "2025-04-10 09:00:00",  # Started
+                    "2025-04-12 15:30:00",  # Completed (settles 2 days later)
+                    "International transfer",
+                    "-100.00",
+                    "0.00",
+                    "EUR",
+                    "COMPLETED",
+                    "900.00",
+                ),
+            ]
+        )
+        try:
+            stmt = RevolutPlugin(UI(), {}).get_parser(path).parse()
+            assert len(stmt.lines) == 1
+            sl = stmt.lines[0]
+            assert sl.date is not None and sl.date.strftime("%Y-%m-%d") == "2025-04-12"
+            assert (
+                sl.date_user is not None
+                and sl.date_user.strftime("%Y-%m-%d") == "2025-04-10"
+            )
         finally:
             os.unlink(path)
 
@@ -1403,7 +1552,7 @@ class TestCSVParser:
             stmt = RevolutPlugin(UI(), {"currency": "USD"}).get_parser(path).parse()
             assert stmt.currency == "USD"
             assert len(stmt.lines) == 1
-            assert stmt.lines[0].memo == "Exchanged to USD"
+            assert stmt.lines[0].payee == "Exchanged to USD"
         finally:
             os.unlink(path)
 
@@ -1632,7 +1781,7 @@ class TestCSVParser:
         try:
             stmt = RevolutPlugin(UI(), {}).get_parser(path).parse()
             assert len(stmt.lines) == 2
-            assert {sl.memo for sl in stmt.lines} == {
+            assert {sl.payee for sl in stmt.lines} == {
                 "lowercase state",
                 "settled state",
             }
