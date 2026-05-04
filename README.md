@@ -23,12 +23,19 @@ the file extension:
 
 ## Supported currencies
 
-Multi-currency statements are auto-detected:
+Currency is auto-detected, with config able to override:
 
 - **PDF**: currency is read from the PDF header (`USD Statement`, `TRY Statement`, …).
 - **CSV**: currency is read from the `Currency` column. Revolut exports one
-  CSV per currency account; if a file contains multiple currencies the
-  dominant one is used and the rest are dropped.
+  CSV per currency account, so a single-currency file is the expected case
+  and the parser adopts that currency automatically. If the file holds
+  more than one currency and `currency` is not set in config, parsing
+  aborts with a per-currency line-count breakdown ("EUR=2, USD=1") so
+  nothing is dropped silently. To export every currency from a mixed
+  file, define one config section per currency and run the converter
+  once per section. When `currency` *is* set, it acts as an explicit
+  filter; if the chosen currency is not present in the file the parser
+  warns rather than erroring (an empty OFX is its own signal).
 
 Currencies with a well-known symbol are written in PDFs as `<symbol><amount>`
 (e.g. `$19.61`); others are written as `<amount> <CODE>` (e.g. `29,155.00 TRY`).
@@ -246,7 +253,7 @@ account_id = DE92100101787623104264
 | Option | Default | Description |
 |---|---|---|
 | `account` | `Current` | Account section to import: `Current`, `Deposit`, or a sub-account owner name (e.g. `Andrew`). Case-insensitive. |
-| `currency` | `EUR` | Statement currency (auto-detected from PDF). |
+| `currency` | *(auto-detected)* | Statement currency. PDFs read it from the header (falling back to `EUR`); CSVs adopt the file's only currency, or require an explicit value when the CSV is mixed-currency. Setting this also acts as a filter — rows in other currencies are dropped. |
 | `account_id` | *(empty)* | Account identifier (e.g. IBAN). Auto-detected from the PDF header if not set. |
 
 Sub-account selection (`account = Andrew`) returns all of that person's

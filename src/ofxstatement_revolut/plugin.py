@@ -25,7 +25,11 @@ class RevolutPlugin(Plugin):
 
     def get_parser(self, filename: str) -> AbstractStatementParser:
         account = self.settings.get("account", "Current")
-        currency = self.settings.get("currency", "EUR")
+        # `currency` is left None when not configured so the parser can
+        # distinguish "auto-detect from file" from "filter to this code".
+        # The PDF parser still falls back to "EUR" if extraction fails;
+        # the CSV parser errors out on multi-currency files with no filter.
+        currency = self.settings.get("currency")
         account_id = self.settings.get("account_id", "")
 
         if filename.lower().endswith(".pdf"):

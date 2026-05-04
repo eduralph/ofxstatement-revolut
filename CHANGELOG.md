@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-05-04
+
+### Changed
+- **CSV: multi-currency files without `currency` set now error.**
+  Previously the parser silently picked the dominant currency and
+  dropped the rest, which masked real activity on accounts that mix
+  currencies (rare on Revolut — the typical export is one CSV per
+  currency account — but still a data-loss path). Single-currency
+  CSVs are unchanged. To export every currency from a mixed file,
+  define one config section per currency and rerun the converter once
+  per section. Mirrors the same behaviour adopted by
+  `ofxstatement-paypal-2 3.3.0`.
+- **CSV: configured `currency` now wins over auto-detection.** When
+  `currency` is set in config it is honoured as the explicit filter;
+  detection only fills in when `currency` is unset. Previously
+  detection always overrode the configured value.
+- **CSV: warns when the configured `currency` isn't present** in the
+  file (instead of silently producing an empty OFX with no signal).
+- **Plugin: `currency` no longer defaults to `"EUR"`.** Unset stays
+  unset so the parser can distinguish "auto-detect" from "filter to
+  EUR". The PDF parser still falls back to `"EUR"` internally if the
+  PDF heading doesn't yield a currency, preserving today's PDF
+  behaviour.
+
 ## [0.2.1] - 2026-04-13
 
 ### Fixed
