@@ -183,6 +183,24 @@ def _make_csv(
 
 
 class TestPDFParser:
+    def test_pdf_parse_logs_plugin_version_first(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """First INFO line records the plugin version, for install diagnostics."""
+        path = _make_pdf(
+            [
+                ("Jan 5, 2025", "Coffee", "€5.00", None, "€995.00"),
+            ]
+        )
+        try:
+            with caplog.at_level("INFO", logger="ofxstatement_revolut.pdf_parser"):
+                RevolutPlugin(UI(), {}).get_parser(path).parse()
+            assert caplog.records, "no log records captured"
+            first = caplog.records[0]
+            assert "ofxstatement-revolut version" in first.getMessage()
+        finally:
+            os.unlink(path)
+
     def test_parse_account_transactions(self) -> None:
         path = _make_pdf(
             [
@@ -1100,6 +1118,35 @@ class TestPDFParser:
 
 
 class TestCSVParser:
+    def test_csv_parse_logs_plugin_version_first(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """First INFO line records the plugin version, for install diagnostics."""
+        path = _make_csv(
+            [
+                (
+                    "Card Payment",
+                    "Current",
+                    "2025-01-01 10:00:00",
+                    "2025-01-01 10:00:00",
+                    "Merchant",
+                    "-10.00",
+                    "0.00",
+                    "EUR",
+                    "COMPLETED",
+                    "90.00",
+                ),
+            ]
+        )
+        try:
+            with caplog.at_level("INFO", logger="ofxstatement_revolut.csv_parser"):
+                RevolutPlugin(UI(), {}).get_parser(path).parse()
+            assert caplog.records, "no log records captured"
+            first = caplog.records[0]
+            assert "ofxstatement-revolut version" in first.getMessage()
+        finally:
+            os.unlink(path)
+
     def test_parse_csv_transactions(self) -> None:
         path = _make_csv(
             [

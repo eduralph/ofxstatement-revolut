@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-05-04
+
+### Added
+- Both parsers now log the installed plugin version as the first INFO
+  line of `parse()`. Lets a user reading the convert output confirm
+  which install actually ran, without having to drop out and
+  `pip show ofxstatement-revolut`. Resolved at runtime via
+  `importlib.metadata.version` with a graceful `"unknown"` fallback.
+
 ## [0.4.0] - 2026-05-04
 
 ### Changed
