@@ -25,6 +25,8 @@ import pdfplumber
 from ofxstatement.parser import AbstractStatementParser
 from ofxstatement.statement import Statement, StatementLine
 
+from ofxstatement_revolut import plugin_version
+
 logger = logging.getLogger(__name__)
 
 # ── Default x-coordinate thresholds for column detection ─────────────────────
@@ -727,6 +729,10 @@ class RevolutPDFParser(AbstractStatementParser):
         self._header_rows_seen = 0
 
     def parse(self) -> Statement:
+        # Version line first so the user reading the convert output can
+        # confirm which install of the plugin actually ran (helps when
+        # several checkouts / pip / pipx installs coexist).
+        logger.info("ofxstatement-revolut version %s", plugin_version())
         logger.info("Parsing PDF %s", self.filename)
         statement = Statement()
         statement.bank_id = "Revolut"

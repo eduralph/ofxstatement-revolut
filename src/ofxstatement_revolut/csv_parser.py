@@ -25,6 +25,8 @@ from ofxstatement.exceptions import ParseError
 from ofxstatement.parser import AbstractStatementParser
 from ofxstatement.statement import Statement, StatementLine
 
+from ofxstatement_revolut import plugin_version
+
 logger = logging.getLogger(__name__)
 
 # Timestamp formats accepted in the Completed Date / Started Date columns.
@@ -322,6 +324,10 @@ class RevolutCSVParser(AbstractStatementParser):
         self._last_balance: Optional[Decimal] = None
 
     def parse(self) -> Statement:
+        # Version line first so the user reading the convert output can
+        # confirm which install of the plugin actually ran (helps when
+        # several checkouts / pip / pipx installs coexist).
+        logger.info("ofxstatement-revolut version %s", plugin_version())
         logger.info("Parsing CSV %s", self.filename)
         statement = Statement()
         statement.account_id = self.account_id
