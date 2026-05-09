@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-05-09
+
+### Added
+- **`exclude_internal_pocket_transfers` config option** (default `false`)
+  on both the PDF and CSV parsers. When enabled, rows whose Description
+  matches `(To|From) <CCY> <pocket name>`, `To pocket <CCY> …`, or
+  `Pocket Withdrawal` are dropped before the OFX is written. Useful when
+  importing the main-account OFX and the deposit-pocket OFX into the
+  same accounting tool — the transfer would otherwise double-count.
+- **README "Multi-account exports" section** with a worked example of
+  stacking config sections to produce one OFX per account/pocket from a
+  single Revolut PDF, and guidance on when to enable the new filter.
+- Reusable `is_internal_pocket_transfer(description)` helper in
+  `ofxstatement_revolut/__init__.py`. Uses an explicit ISO-4217
+  currency-code allowlist so real merchants whose name happens to be
+  three uppercase letters (e.g. `To BMW Group …`) are not misidentified
+  as pocket transfers.
+
 ## [0.4.2] - 2026-05-08
 
 ### Developer tooling

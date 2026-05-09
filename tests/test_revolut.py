@@ -23,6 +23,7 @@ from ofxstatement_revolut.pdf_parser import (
     _match_txn_type,
     _parse_date,
 )
+from ofxstatement_revolut import is_internal_pocket_transfer
 from ofxstatement_revolut.plugin import RevolutPlugin
 
 # fpdf mm coordinates that produce the pdfplumber point-coordinates the parser expects
@@ -182,6 +183,51 @@ def _make_csv(
     return path
 
 
+class TestIsInternalPocketTransfer:
+    """Pure-function tests for the description-pattern matcher."""
+
+    @pytest.mark.parametrize(
+        "description",
+        [
+            "To EUR Savings",
+            "From EUR Savings",
+            "To EUR Family Savings",
+            "From EUR Family Savings",
+            "To EUR Bike Savings",
+            "From USD Trip Money",
+            "To GBP Holiday",
+            "To pocket EUR Gaming PC from EUR",
+            "Pocket Withdrawal",
+        ],
+    )
+    def test_matches_pocket_transfer_shapes(self, description: str) -> None:
+        assert is_internal_pocket_transfer(description)
+
+    @pytest.mark.parametrize(
+        "description",
+        [
+            # Real transfers to people / entities — must NOT match
+            "Transfer to JANE DOE",
+            "Transfer from ACME CORP",
+            "To PayPal (Europe) S.a r.l. et Cie, S.C.A.",
+            "To John Smith",  # Person name (not a 3-letter currency code)
+            "To Faircollect",
+            # Card payments — start with merchant name, not "To"
+            "Amazon",
+            "BAUHAUS",
+            # Three-letter merchant name not followed by typical pocket structure
+            # — protected by the explicit ISO-4217 currency-code allowlist.
+            "To BMW Group",
+            "From IBM Deutschland",
+            # Empty / blank
+            "",
+            "   ",
+        ],
+    )
+    def test_does_not_match_real_transactions(self, description: str) -> None:
+        assert not is_internal_pocket_transfer(description)
+
+
 class TestPDFParser:
     def test_pdf_parse_logs_plugin_version_first(
         self, caplog: pytest.LogCaptureFixture
@@ -198,6 +244,51 @@ class TestPDFParser:
             assert caplog.records, "no log records captured"
             first = caplog.records[0]
             assert "ofxstatement-revolut version" in first.getMessage()
+        finally:
+            os.unlink(path)
+
+    def test_pdf_pocket_transfers_kept_by_default(self) -> None:
+        """Default behaviour preserves pocket-transfer rows."""
+        path = _make_pdf(
+            [
+                ("Jan 5, 2025", "Coffee Shop", "€3.50", None, "€996.50"),
+                ("Jan 6, 2025", "To EUR Savings", "€100.00", None, "€896.50"),
+                ("Jan 8, 2025", "From EUR Savings", None, "€50.00", "€946.50"),
+            ]
+        )
+        try:
+            stmt = RevolutPlugin(UI(), {"account": "Current"}).get_parser(path).parse()
+            assert len(stmt.lines) == 3
+            memos = [sl.memo or "" for sl in stmt.lines]
+            assert any("To EUR Savings" in m for m in memos)
+            assert any("From EUR Savings" in m for m in memos)
+        finally:
+            os.unlink(path)
+
+    def test_pdf_pocket_transfers_dropped_when_setting_enabled(self) -> None:
+        """`exclude_internal_pocket_transfers = true` drops "(To|From) <CCY> …" rows."""
+        path = _make_pdf(
+            [
+                ("Jan 5, 2025", "Coffee Shop", "€3.50", None, "€996.50"),
+                ("Jan 6, 2025", "To EUR Savings", "€100.00", None, "€896.50"),
+                ("Jan 8, 2025", "From EUR Savings", None, "€50.00", "€946.50"),
+                ("Jan 10, 2025", "Transfer to JANE DOE", "€25.00", None, "€921.50"),
+            ]
+        )
+        try:
+            plugin = RevolutPlugin(
+                UI(),
+                {
+                    "account": "Current",
+                    "exclude_internal_pocket_transfers": "true",
+                },
+            )
+            stmt = plugin.get_parser(path).parse()
+            assert len(stmt.lines) == 2
+            memos = " | ".join(sl.memo or "" for sl in stmt.lines)
+            assert "EUR Savings" not in memos
+            assert "Coffee Shop" in memos
+            assert "Transfer to JANE DOE" in memos
         finally:
             os.unlink(path)
 
@@ -1600,6 +1691,88 @@ class TestCSVParser:
             assert stmt.currency == "USD"
             assert len(stmt.lines) == 1
             assert stmt.lines[0].payee == "Exchanged to USD"
+        finally:
+            os.unlink(path)
+
+    def _mixed_main_and_pocket_csv(self) -> str:
+        """A CSV with a real merchant payment + a transfer to a savings pocket."""
+        return _make_csv(
+            [
+                (
+                    "Card Payment",
+                    "Current",
+                    "2025-04-01 10:00:00",
+                    "2025-04-01 10:00:00",
+                    "Coffee shop",
+                    "-3.50",
+                    "0.00",
+                    "EUR",
+                    "COMPLETED",
+                    "996.50",
+                ),
+                (
+                    "Transfer",
+                    "Current",
+                    "2025-04-02 09:00:00",
+                    "2025-04-02 09:00:00",
+                    "To EUR Savings",
+                    "-100.00",
+                    "0.00",
+                    "EUR",
+                    "COMPLETED",
+                    "896.50",
+                ),
+                (
+                    "Transfer",
+                    "Current",
+                    "2025-04-05 09:00:00",
+                    "2025-04-05 09:00:00",
+                    "From EUR Savings",
+                    "50.00",
+                    "0.00",
+                    "EUR",
+                    "COMPLETED",
+                    "946.50",
+                ),
+                (
+                    "Transfer",
+                    "Current",
+                    "2025-04-06 09:00:00",
+                    "2025-04-06 09:00:00",
+                    "Transfer to JANE DOE",
+                    "-25.00",
+                    "0.00",
+                    "EUR",
+                    "COMPLETED",
+                    "921.50",
+                ),
+            ]
+        )
+
+    def test_csv_pocket_transfers_kept_by_default(self) -> None:
+        """Default behaviour preserves pocket-transfer rows (no surprise migration)."""
+        path = self._mixed_main_and_pocket_csv()
+        try:
+            stmt = RevolutPlugin(UI(), {}).get_parser(path).parse()
+            assert len(stmt.lines) == 4
+            payees = [sl.payee for sl in stmt.lines]
+            assert "To EUR Savings" in payees
+            assert "From EUR Savings" in payees
+        finally:
+            os.unlink(path)
+
+    def test_csv_pocket_transfers_dropped_when_setting_enabled(self) -> None:
+        """`exclude_internal_pocket_transfers = true` drops "(To|From) <CCY> …" rows."""
+        path = self._mixed_main_and_pocket_csv()
+        try:
+            stmt = (
+                RevolutPlugin(UI(), {"exclude_internal_pocket_transfers": "true"})
+                .get_parser(path)
+                .parse()
+            )
+            assert len(stmt.lines) == 2
+            payees = {sl.payee for sl in stmt.lines}
+            assert payees == {"Coffee shop", "Transfer to JANE DOE"}
         finally:
             os.unlink(path)
 

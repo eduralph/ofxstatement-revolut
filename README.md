@@ -256,16 +256,17 @@ Configure the plugin via `ofxstatement edit-config`:
 plugin = revolut
 account = Current
 currency = EUR
-account_id = DE92100101787623104264
+account_id = DE89370400440532013000
 ```
 
 | Option | Default | Description |
 |---|---|---|
-| `account` | `Current` | Account section to import: `Current`, `Deposit`, or a sub-account owner name (e.g. `Andrew`). Case-insensitive. |
+| `account` | `Current` | Account section to import: `Current`, `Deposit`, or a sub-account owner name (e.g. `Alice`). Case-insensitive. |
 | `currency` | *(auto-detected)* | Statement currency. PDFs read it from the header (falling back to `EUR`); CSVs adopt the file's only currency, or require an explicit value when the CSV is mixed-currency. Setting this also acts as a filter — rows in other currencies are dropped. |
 | `account_id` | *(empty)* | Account identifier (e.g. IBAN). Auto-detected from the PDF header if not set. |
+| `exclude_internal_pocket_transfers` | `false` | Drop rows whose Description matches `(To\|From) <CCY> <pocket name>` (transfers between an account and one of its own savings pockets). See [Multi-account exports](#multi-account-exports) for when to enable this. |
 
-Sub-account selection (`account = Andrew`) returns all of that person's
+Sub-account selection (`account = Alice`) returns all of that person's
 transactions across their current account, pockets, and savings sections.
 This only works with PDF statements — see [Caveats](#caveats).
 
@@ -274,6 +275,71 @@ Enable debug logging to see exactly how the parser processes each line:
 ```
 ofxstatement -d convert -t revolut statement.pdf statement.ofx
 ```
+
+
+### Multi-account exports
+
+A single Revolut PDF often covers several distinct accounts: your main
+current account, your deposit/savings pockets, and (if you have Revolut
+\<18 or shared spaces) any sub-account holder's current, pockets, and
+deposit. To import them separately, define one config section per
+account and run the converter once per section against the same PDF:
+
+```ini
+# Your main current account
+[revolut]
+plugin = revolut
+account = Current
+account_id = DE89370400440532013000
+exclude_internal_pocket_transfers = true
+
+# Your own savings / deposit pockets ("Savings", "Family Savings", …)
+[revolut-deposit]
+plugin = revolut
+account = Deposit
+account_id = revolut-eduard-deposit
+exclude_internal_pocket_transfers = true
+
+# A sub-account holder, e.g. "Alice" — bundles her current account,
+# pockets, and deposit transactions into one OFX
+[revolut-alice]
+plugin = revolut
+account = Alice
+account_id = revolut-alice
+exclude_internal_pocket_transfers = true
+```
+
+```bash
+ofxstatement convert -t revolut         statement.pdf main.ofx
+ofxstatement convert -t revolut-deposit statement.pdf deposit.ofx
+ofxstatement convert -t revolut-alice   statement.pdf alice.ofx
+```
+
+#### When to enable `exclude_internal_pocket_transfers`
+
+A "(To\|From) `<CCY>` `<pocket name>`" row in the main account section is
+the **same** transfer that appears in the deposit section from the other
+side. If you import both OFX files and don't filter, the transfer
+double-counts:
+
+- main account loses `€100` to "To EUR Savings"
+- deposit account gains `€100` from the corresponding entry
+
+Setting `exclude_internal_pocket_transfers = true` drops those rows,
+leaving each ledger with only its own external flows. Recommended when
+you import every account separately into the same accounting tool.
+Leave it off if you only ever import the main account and treat the
+pocket transfers as ordinary outflows.
+
+The filter recognises three description shapes:
+
+- `(To|From) <CCY> <pocket>` — main statement form (`To EUR Savings`)
+- `To pocket <CCY> <name> from <CCY>` — sub-account-side form
+- `Pocket Withdrawal` — sub-account withdrawal
+
+It deliberately uses an explicit ISO-4217 currency-code allowlist
+(`EUR`, `USD`, `GBP`, `JPY`, …) so a real merchant whose name happens
+to be three uppercase letters (`To BMW Group …`) is not misidentified.
 
 
 ## Development setup

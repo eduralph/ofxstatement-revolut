@@ -25,7 +25,7 @@ import pdfplumber
 from ofxstatement.parser import AbstractStatementParser
 from ofxstatement.statement import Statement, StatementLine
 
-from ofxstatement_revolut import plugin_version
+from ofxstatement_revolut import is_internal_pocket_transfer, plugin_version
 
 logger = logging.getLogger(__name__)
 
@@ -709,6 +709,7 @@ class RevolutPDFParser(AbstractStatementParser):
         account: str = "Current",
         currency: Optional[str] = None,
         account_id: str = "",
+        exclude_internal_pocket_transfers: bool = False,
     ):
         self.filename = filename
         self.account_filter = account
@@ -718,6 +719,7 @@ class RevolutPDFParser(AbstractStatementParser):
         # neither config nor heading provides a value.
         self.currency = currency or "EUR"
         self.account_id = account_id
+        self.exclude_internal_pocket_transfers = exclude_internal_pocket_transfers
         # Column x-thresholds — recalibrated when the header row is parsed.
         self._desc_x = _DEFAULT_DESC_X
         self._money_out_x = _DEFAULT_MONEY_OUT_X
@@ -760,6 +762,18 @@ class RevolutPDFParser(AbstractStatementParser):
             )
 
         filtered = self._filter_transactions(raw_transactions)
+        if self.exclude_internal_pocket_transfers:
+            before = len(filtered)
+            filtered = [
+                t for t in filtered if not is_internal_pocket_transfer(t.description)
+            ]
+            dropped = before - len(filtered)
+            if dropped:
+                logger.info(
+                    "Dropped %d internal pocket-transfer row(s) "
+                    "(exclude_internal_pocket_transfers=true)",
+                    dropped,
+                )
         statement.currency = self.currency
         logger.info(
             "Extracted %d total transactions, %d match account=%r",
