@@ -25,7 +25,7 @@ from ofxstatement.exceptions import ParseError
 from ofxstatement.parser import AbstractStatementParser
 from ofxstatement.statement import Statement, StatementLine
 
-from ofxstatement_revolut import plugin_version
+from ofxstatement_revolut import is_internal_pocket_transfer, plugin_version
 
 logger = logging.getLogger(__name__)
 
@@ -310,6 +310,7 @@ class RevolutCSVParser(AbstractStatementParser):
         account: str = "Current",
         currency: Optional[str] = None,
         account_id: str = "",
+        exclude_internal_pocket_transfers: bool = False,
     ):
         self.filename = filename
         self.account_filter = account
@@ -319,6 +320,7 @@ class RevolutCSVParser(AbstractStatementParser):
         # isn't present in the file at all).
         self.currency: Optional[str] = currency
         self.account_id = account_id
+        self.exclude_internal_pocket_transfers = exclude_internal_pocket_transfers
         self._first_balance: Optional[Decimal] = None
         self._first_row_net_delta: Optional[Decimal] = None
         self._last_balance: Optional[Decimal] = None
@@ -355,6 +357,7 @@ class RevolutCSVParser(AbstractStatementParser):
         skipped_state = 0
         skipped_parse = 0
         skipped_currency = 0
+        skipped_pocket = 0
         skipped_short = 0
 
         # Collected diagnostics for the "nothing came through" case.
@@ -408,6 +411,17 @@ class RevolutCSVParser(AbstractStatementParser):
                 skipped_currency += 1
                 continue
 
+            if self.exclude_internal_pocket_transfers and is_internal_pocket_transfer(
+                row[cols["description"]]
+            ):
+                logger.debug(
+                    "Row %d: skipping internal pocket transfer (%s)",
+                    row_num,
+                    row[cols["description"]].strip(),
+                )
+                skipped_pocket += 1
+                continue
+
             row_lines = self._parse_row(row, row_num, cols)
             if row_lines:
                 statement.lines.extend(row_lines)
@@ -417,15 +431,28 @@ class RevolutCSVParser(AbstractStatementParser):
         statement.currency = self.currency
         skipped_parse += skipped_short
 
-        if skipped_product or skipped_state or skipped_parse or skipped_currency:
+        if (
+            skipped_product
+            or skipped_state
+            or skipped_parse
+            or skipped_currency
+            or skipped_pocket
+        ):
             logger.info(
                 "CSV filtering: %d kept, %d skipped "
-                "(product=%d, state=%d, currency=%d, parse=%d)",
+                "(product=%d, state=%d, currency=%d, pocket=%d, parse=%d)",
                 len(statement.lines),
-                skipped_product + skipped_state + skipped_currency + skipped_parse,
+                (
+                    skipped_product
+                    + skipped_state
+                    + skipped_currency
+                    + skipped_pocket
+                    + skipped_parse
+                ),
                 skipped_product,
                 skipped_state,
                 skipped_currency,
+                skipped_pocket,
                 skipped_parse,
             )
 

@@ -31,8 +31,35 @@ class RevolutPlugin(Plugin):
         # the CSV parser errors out on multi-currency files with no filter.
         currency = self.settings.get("currency")
         account_id = self.settings.get("account_id", "")
+        # Drop "(To|From) <CCY> <pocket>" rows that represent transfers
+        # between an account and one of its own savings pockets, so that
+        # importing both the main-account and the pocket OFX into
+        # accounting software doesn't double-count the same flow. Default
+        # off — preserves the previous behaviour for users who weren't
+        # asking for the filter; opt in via config when needed.
+        exclude_internal_pocket_transfers = _to_bool(
+            self.settings.get("exclude_internal_pocket_transfers", "false")
+        )
 
         if filename.lower().endswith(".pdf"):
-            return RevolutPDFParser(filename, account, currency, account_id)
-        else:
-            return RevolutCSVParser(filename, account, currency, account_id)
+            return RevolutPDFParser(
+                filename,
+                account,
+                currency,
+                account_id,
+                exclude_internal_pocket_transfers=exclude_internal_pocket_transfers,
+            )
+        return RevolutCSVParser(
+            filename,
+            account,
+            currency,
+            account_id,
+            exclude_internal_pocket_transfers=exclude_internal_pocket_transfers,
+        )
+
+
+def _to_bool(value: object) -> bool:
+    """Coerce a config-file string ("true"/"false"/"1"/"0"/"yes"/"no") to bool."""
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() in ("true", "1", "yes", "on")
